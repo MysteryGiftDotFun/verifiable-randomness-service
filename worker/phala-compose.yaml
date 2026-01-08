@@ -1,0 +1,24 @@
+services:
+  tee-randomness:
+    image: phantasybot/tee-randomness:v0.0.5
+    ports:
+      - '3000:3000'
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - PHALA_APP_ID=0fd4d6d4ad7d850389643319dd0e35ad14f578a5
+      - PAYMENT_WALLET=${PAYMENT_WALLET:-3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx}
+      - WHITELIST=${WHITELIST:-localhost,mysterygift.fun,api.mysterygift.fun,rng.mysterygift.fun}
+      - API_KEYS=mys_tee_4966c61e2e5bdaffcab4b93f924fd1be81c9fcd3
+      - HELIUS_RPC_URL=${HELIUS_RPC_URL:-}
+      - ALCHEMY_RPC_URL=${ALCHEMY_RPC_URL:-}
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    restart: always
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/v1/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

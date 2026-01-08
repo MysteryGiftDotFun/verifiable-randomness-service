@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.next/
+build/
+
+# Environment files
+.env
+.env.local
+.env.deploy
+
+# Cloudflare Workers
+.wrangler/
+.dev.vars
+
+# OS files
+.DS_Store
+*.log
+
+# Editor
+.vscode/
+.idea/
+
+# Phala
+.phala/

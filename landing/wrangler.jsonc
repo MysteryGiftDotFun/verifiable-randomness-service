@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "tee-landing-page",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-08",
+  "compatibility_flags": ["nodejs_compat"],
+  
+  // Static assets configuration (for miss.png image)
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+
+  // Environment variables (set via wrangler secret or dashboard)
+  "vars": {
+    // The actual TEE Worker API endpoint (Phala-hosted)
+    "TEE_API_URL": "https://0fd4d6d4ad7d850389643319dd0e35ad14f578a5-3000.dstack-pha-prod5.phala.network"
+  },
+
+  // Routes - bind to rng.mysterygift.fun
+  "routes": [
+    {
+      "pattern": "rng.mysterygift.fun/*",
+      "zone_name": "mysterygift.fun"
+    }
+  ]
+}
