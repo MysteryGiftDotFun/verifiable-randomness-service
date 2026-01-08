@@ -7,7 +7,10 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "tail": "wrangler tail"
+    "cf:deploy": "wrangler deploy --env production",
+    "cf:deploy:dev": "wrangler deploy --env development",
+    "tail": "wrangler tail",
+    "tail:dev": "wrangler tail --env development"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250106.0",

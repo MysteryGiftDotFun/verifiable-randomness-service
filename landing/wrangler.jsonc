@@ -23,5 +23,30 @@
       "pattern": "rng.mysterygift.fun/*",
       "zone_name": "mysterygift.fun"
     }
-  ]
+  ],
+
+  // Environments
+  "env": {
+    "production": {
+      "name": "tee-landing-page",
+      "routes": [
+        {
+          "pattern": "rng.mysterygift.fun/*",
+          "zone_name": "mysterygift.fun"
+        }
+      ]
+    },
+    "development": {
+      "name": "tee-landing-page-dev",
+      "routes": [
+        {
+          "pattern": "rng-dev.mysterygift.fun/*",
+          "zone_name": "mysterygift.fun"
+        }
+      ],
+      "vars": {
+        "TEE_API_URL": "https://0fd4d6d4ad7d850389643319dd0e35ad14f578a5-3000.dstack-pha-prod5.phala.network"
+      }
+    }
+  }
 }

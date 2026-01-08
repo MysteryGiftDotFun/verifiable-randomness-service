@@ -104,9 +104,12 @@ if [ -f .env ]; then
 	echo ""
 fi
 
+# Load package.json version
+PACKAGE_VERSION=$(cat package.json | grep '"version"' | cut -d'"' -f4)
+
 # Set defaults
-IMAGE_NAME="${DOCKER_USERNAME}/tee-randomness:latest"
-CVM_NAME="mysterygift-tee-randomness"
+IMAGE_NAME="${DOCKER_USERNAME}/verified-randomness-service:v${PACKAGE_VERSION}"
+CVM_NAME="verified-randomness-service"
 
 echo "Docker Image: $IMAGE_NAME"
 echo "CVM Name: $CVM_NAME"
