@@ -692,29 +692,32 @@ app.post('/v1/random/winners', paidLimiter, authMiddleware, async (req: Request,
     usageStats.totalRequests++;
 
     // Generate enough randomness for selecting winners
-    const bytesNeeded = Math.ceil(count * 8);
+    const bytesNeeded = Math.ceil(count * 4); // 4 bytes per selection
     const randomBytes = crypto.randomBytes(Math.max(32, bytesNeeded));
     const seed = randomBytes.slice(0, 32).toString('hex');
 
-    // Select unique winners using reservoir-like sampling
-    const indices = new Set<number>();
+    // Use Fisher-Yates partial shuffle for deterministic, collision-free selection
+    // This is more efficient and reliable than reservoir sampling
+    const itemsCopy = [...items];
     const winners: any[] = [];
-    let attempts = 0;
-    const maxAttempts = count * 10;
 
-    while (winners.length < count && attempts < maxAttempts) {
-      const offset = (attempts * 8) % randomBytes.length;
-      const randomValue = Number(randomBytes.readBigUInt64BE(offset) % BigInt(items.length));
-
-      if (!indices.has(randomValue)) {
-        indices.add(randomValue);
-        winners.push({
-          item: items[randomValue],
-          index: randomValue,
-          position: winners.length + 1,
-        });
-      }
-      attempts++;
+    for (let i = 0; i < count; i++) {
+      // Use 4 bytes for each random selection
+      const offset = i * 4;
+      const randomValue = randomBytes.readUInt32BE(offset % randomBytes.length);
+      
+      // Select random index from remaining items
+      const j = i + (randomValue % (itemsCopy.length - i));
+      
+      // Swap selected item to position i
+      [itemsCopy[i], itemsCopy[j]] = [itemsCopy[j], itemsCopy[i]];
+      
+      // Add to winners with metadata
+      winners.push({
+        item: itemsCopy[i],
+        index: items.indexOf(itemsCopy[i]),
+        position: i + 1,
+      });
     }
 
     const attestation = await generateAttestation(

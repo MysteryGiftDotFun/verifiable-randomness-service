@@ -54,11 +54,30 @@ export default {
 
       try {
         const response = await fetch(proxyRequest);
-        // Clone response with CORS headers
+        
+        // Mirror worker's CORS policy - don't blindly allow all origins
         const newHeaders = new Headers(response.headers);
-        newHeaders.set('Access-Control-Allow-Origin', '*');
-        newHeaders.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        newHeaders.set('Access-Control-Allow-Headers', 'Content-Type, X-Payment, X-API-Key');
+        const origin = request.headers.get('Origin');
+        
+        // Allowed origins (must match worker's CORS config)
+        const allowedOrigins = [
+          'https://mysterygift.fun',
+          'https://rng.mysterygift.fun',
+        ];
+        
+        // Check if origin is allowed
+        if (origin && (allowedOrigins.includes(origin) || /\.mysterygift\.fun$/.test(origin))) {
+          newHeaders.set('Access-Control-Allow-Origin', origin);
+          newHeaders.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+          newHeaders.set('Access-Control-Allow-Headers', 'Content-Type, X-Payment, X-API-Key');
+          newHeaders.set('Access-Control-Allow-Credentials', 'true');
+        } else {
+          // Don't set CORS headers for unauthorized origins
+          newHeaders.delete('Access-Control-Allow-Origin');
+          newHeaders.delete('Access-Control-Allow-Methods');
+          newHeaders.delete('Access-Control-Allow-Headers');
+          newHeaders.delete('Access-Control-Allow-Credentials');
+        }
         
         return new Response(response.body, {
           status: response.status,
