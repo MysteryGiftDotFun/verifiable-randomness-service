@@ -1,6 +1,6 @@
 services:
-  tee-randomness:
-    image: phantasybot/tee-randomness:v0.0.5
+  verified-randomness-service:
+    image: phantasybot/verified-randomness-service:v0.0.1
     ports:
       - '3000:3000'
     environment:
@@ -9,10 +9,11 @@ services:
       - PHALA_APP_ID=0fd4d6d4ad7d850389643319dd0e35ad14f578a5
       - PAYMENT_WALLET=${PAYMENT_WALLET:-3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx}
       - WHITELIST=${WHITELIST:-localhost,mysterygift.fun,api.mysterygift.fun,rng.mysterygift.fun}
-      - API_KEYS=mys_tee_4966c61e2e5bdaffcab4b93f924fd1be81c9fcd3
+      - API_KEYS=${API_KEYS:-}
       - HELIUS_RPC_URL=${HELIUS_RPC_URL:-}
       - ALCHEMY_RPC_URL=${ALCHEMY_RPC_URL:-}
       - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
+      - GLITCHTIP_DSN=${GLITCHTIP_DSN:-}
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
     restart: always

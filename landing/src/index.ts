@@ -14,7 +14,7 @@ export interface Env {
 }
 
 // Configuration
-const VERSION = '0.0.5';
+const VERSION = '0.0.1';
 const APP_ID = '0fd4d6d4ad7d850389643319dd0e35ad14f578a5';
 const PAYMENT_WALLET = '3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx';
 const RPC_URL = 'https://api.mainnet-beta.solana.com';

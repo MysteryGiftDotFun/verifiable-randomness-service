@@ -1,6 +1,6 @@
 {
-  "name": "tee-randomness-worker",
-  "version": "0.0.5",
+  "name": "verified-randomness-service",
+  "version": "0.0.1",
   "description": "Secure Randomness Generator for Phala TEE with x402 Payment Support",
   "main": "dist/index.js",
   "scripts": {
