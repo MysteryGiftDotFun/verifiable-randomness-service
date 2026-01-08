@@ -1,6 +1,6 @@
 # Verifiable Randomness Service
 
-TEE-powered verifiable randomness for the Mystery Gift platform.
+TEE-powered verifiable randomness for the [Mystery Gift](https://mysterygift.fun) platform.
 
 ## Architecture
 
