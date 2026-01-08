@@ -14,7 +14,7 @@
   // Environment variables (set via wrangler secret or dashboard)
   "vars": {
     // The actual TEE Worker API endpoint (Phala-hosted)
-    "TEE_API_URL": "https://0fd4d6d4ad7d850389643319dd0e35ad14f578a5-3000.dstack-pha-prod5.phala.network"
+    "TEE_API_URL": "https://514637b043ddfebe3bafd3f3eeb67b202dd13370-3000.dstack-pha-prod5.phala.network"
   },
 
   // Routes - bind to rng.mysterygift.fun
@@ -34,7 +34,10 @@
           "pattern": "rng.mysterygift.fun/*",
           "zone_name": "mysterygift.fun"
         }
-      ]
+      ],
+      "vars": {
+        "TEE_API_URL": "https://514637b043ddfebe3bafd3f3eeb67b202dd13370-3000.dstack-pha-prod5.phala.network"
+      }
     },
     "development": {
       "name": "tee-landing-page-dev",
@@ -45,7 +48,7 @@
         }
       ],
       "vars": {
-        "TEE_API_URL": "https://0fd4d6d4ad7d850389643319dd0e35ad14f578a5-3000.dstack-pha-prod5.phala.network"
+        "TEE_API_URL": "https://514637b043ddfebe3bafd3f3eeb67b202dd13370-3000.dstack-pha-prod5.phala.network"
       }
     }
   }
