@@ -6,11 +6,37 @@ import path from 'path';
 import fs from 'fs';
 import { DstackClient } from '@phala/dstack-sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
+import { LRUCache } from 'lru-cache';
+import rateLimit from 'express-rate-limit';
+import * as Sentry from '@sentry/node';
+
+// Initialize GlitchTip/Sentry monitoring
+if (process.env.GLITCHTIP_DSN) {
+  Sentry.init({
+    dsn: process.env.GLITCHTIP_DSN,
+    environment: process.env.NODE_ENV || 'development',
+    release: `tee-worker@${process.env.npm_package_version || '0.0.5'}`,
+    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+  });
+  console.log('[TEE] GlitchTip/Sentry monitoring initialized');
+}
 
 const app = express();
 
 app.use(express.json());
-app.use(cors());
+
+// Strict CORS configuration
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production'
+    ? [
+        'https://mysterygift.fun',
+        'https://rng.mysterygift.fun',
+        /\.mysterygift\.fun$/,
+      ]
+    : true, // Allow all in development
+  credentials: true,
+  optionsSuccessStatus: 200,
+}));
 
 const PORT = process.env.PORT || 3000;
 
@@ -148,12 +174,16 @@ let TEE_INFO: {
   instance_id: '',
 };
 
-// Used signatures cache (prevent replay attacks)
-// Cleaned up every hour
-const usedSignatures = new Set<string>();
+// Used signatures LRU cache (prevent replay attacks + DOS)
+const usedSignatures = new LRUCache<string, boolean>({
+  max: 10000, // Max 10k signatures to prevent memory exhaustion
+  ttl: 3600000, // 1 hour TTL (auto-cleanup)
+  ttlAutopurge: true,
+});
+
+// Log cache stats periodically
 setInterval(() => {
-  usedSignatures.clear();
-  console.log('[TEE] Cleared signature cache');
+  console.log(`[TEE] Signature cache: ${usedSignatures.size}/${usedSignatures.max} entries`);
 }, 3600000);
 
 // Log RPC configuration on startup
@@ -190,6 +220,38 @@ const usageStats = {
   whitelistedRequests: 0,
   totalRevenueCents: 0,
 };
+
+// Rate limiters
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute per IP
+  message: { error: 'Too many requests, please slow down' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const paidLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20, // 20 paid requests per minute
+  keyGenerator: (req) => {
+    // Rate limit by payment signature OR IP
+    const paymentHeader = req.get('X-Payment') || req.get('Payment');
+    if (paymentHeader) {
+      try {
+        const parts = paymentHeader.split(' ');
+        if (parts[1]) {
+          const proof = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+          return proof.tx_signature || req.ip;
+        }
+      } catch (e) {}
+    }
+    return req.ip || 'unknown';
+  },
+  message: { error: 'Rate limit exceeded for paid requests' },
+});
+
+// Apply global rate limiter to all /v1/ routes
+app.use('/v1/', globalLimiter);
 
 /**
  * Middleware: Check authentication and payment
@@ -283,17 +345,21 @@ async function verifyX402Payment(paymentHeader: string): Promise<boolean> {
       return false;
     }
 
-    // 2. Check replay attack (cache)
+    // 2. Check replay attack (FIX: Add to cache BEFORE verification to prevent race condition)
     if (usedSignatures.has(proofData.tx_signature)) {
       console.warn(`[TEE] Replay attempt detected: ${proofData.tx_signature}`);
       return false;
     }
+    // Mark as used immediately (atomic operation)
+    usedSignatures.set(proofData.tx_signature, true);
 
-    // 3. Skip on-chain verification in simulation mode IF configured to do so
-    // BUT for public endpoint we should probably enforce it even in sim mode if possible
-    // For now we'll keep the bypass for local dev without RPC
+    // 3. SECURITY: Never bypass payment verification in production
     if (TEE_TYPE === 'simulation' && RPC_PROVIDERS.length === 0) {
-      console.log('[TEE] Simulation mode: Accepting payment proof without on-chain verification');
+      if (process.env.NODE_ENV === 'production') {
+        usedSignatures.delete(proofData.tx_signature); // Remove from cache
+        throw new Error('RPC providers unavailable - cannot verify payments');
+      }
+      console.warn('[DEV] Accepting unverified payment - LOCAL DEVELOPMENT ONLY');
       return true;
     }
 
@@ -308,19 +374,37 @@ async function verifyX402Payment(paymentHeader: string): Promise<boolean> {
 
     if (!tx) {
       console.warn(`[TEE] Transaction not found: ${proofData.tx_signature}`);
+      usedSignatures.delete(proofData.tx_signature); // Remove from cache on failure
       return false;
     }
 
     if (tx.meta?.err) {
       console.warn(`[TEE] Transaction failed on-chain: ${proofData.tx_signature}`);
+      usedSignatures.delete(proofData.tx_signature); // Remove from cache on failure
       return false;
     }
 
-    // Check recency (transaction must be within last hour)
+    // Check recency (transaction must be within last hour, not from future)
     if (tx.blockTime) {
       const now = Math.floor(Date.now() / 1000);
-      if (now - tx.blockTime > 3600) {
-        console.warn(`[TEE] Transaction too old: ${proofData.tx_signature}`);
+      const age = now - tx.blockTime;
+      
+      // Reject if too old (>1h) OR from future (>5min clock skew tolerance)
+      if (age > 3600 || age < -300) {
+        console.warn(`[TEE] Invalid transaction age: ${age}s`);
+        usedSignatures.delete(proofData.tx_signature); // Remove from cache on failure
+        return false;
+      }
+    } else {
+      // For very recent txs without blockTime, check slot age
+      const conn = getPrimaryConnection();
+      const currentSlot = await conn.getSlot();
+      const txSlot = tx.slot || 0;
+      
+      // Reject if older than ~80 seconds (200 slots * 400ms)
+      if (currentSlot - txSlot > 200) {
+        console.warn(`[TEE] Transaction slot too old: ${txSlot} vs ${currentSlot}`);
+        usedSignatures.delete(proofData.tx_signature); // Remove from cache on failure
         return false;
       }
     }
@@ -382,11 +466,11 @@ async function verifyX402Payment(paymentHeader: string): Promise<boolean> {
 
     if (!paymentFound) {
       console.warn(`[TEE] Payment not found in transaction: ${proofData.tx_signature}`);
+      usedSignatures.delete(proofData.tx_signature); // Remove from cache on failure
       return false;
     }
 
-    // Success! Mark signature as used
-    usedSignatures.add(proofData.tx_signature);
+    // Success! Signature already marked as used earlier (line ~290)
     return true;
   } catch (error) {
     console.error('[TEE] Payment proof verification error:', error);
@@ -398,7 +482,7 @@ async function verifyX402Payment(paymentHeader: string): Promise<boolean> {
  * POST /v1/randomness
  * Returns raw 256-bit random seed with attestation
  */
-app.post('/v1/randomness', authMiddleware, async (req: Request, res: Response) => {
+app.post('/v1/randomness', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
   try {
     const { request_hash, metadata } = req.body;
 
@@ -436,7 +520,7 @@ app.post('/v1/randomness', authMiddleware, async (req: Request, res: Response) =
  * Returns a random integer between min and max (inclusive)
  * Body: { min?: number, max: number, request_hash?: string }
  */
-app.post('/v1/random/number', authMiddleware, async (req: Request, res: Response) => {
+app.post('/v1/random/number', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
   try {
     const { min = 1, max, request_hash } = req.body;
 
@@ -483,7 +567,7 @@ app.post('/v1/random/number', authMiddleware, async (req: Request, res: Response
  * Picks one random item from a provided list
  * Body: { items: any[], request_hash?: string }
  */
-app.post('/v1/random/pick', authMiddleware, async (req: Request, res: Response) => {
+app.post('/v1/random/pick', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
   try {
     const { items, request_hash } = req.body;
 
@@ -529,7 +613,7 @@ app.post('/v1/random/pick', authMiddleware, async (req: Request, res: Response) 
  * Shuffles a list using Fisher-Yates algorithm with TEE randomness
  * Body: { items: any[], request_hash?: string }
  */
-app.post('/v1/random/shuffle', authMiddleware, async (req: Request, res: Response) => {
+app.post('/v1/random/shuffle', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
   try {
     const { items, request_hash } = req.body;
 
@@ -581,7 +665,7 @@ app.post('/v1/random/shuffle', authMiddleware, async (req: Request, res: Respons
  * Pick multiple unique winners from a list
  * Body: { items: any[], count: number, request_hash?: string }
  */
-app.post('/v1/random/winners', authMiddleware, async (req: Request, res: Response) => {
+app.post('/v1/random/winners', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
   try {
     const { items, count = 1, request_hash } = req.body;
 
@@ -658,7 +742,7 @@ app.post('/v1/random/winners', authMiddleware, async (req: Request, res: Respons
  * Generates a cryptographically secure UUIDv4
  * Body: { request_hash?: string }
  */
-app.post('/v1/random/uuid', authMiddleware, async (req: Request, res: Response) => {
+app.post('/v1/random/uuid', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
   try {
     const { request_hash } = req.body;
 
@@ -700,7 +784,7 @@ app.post('/v1/random/uuid', authMiddleware, async (req: Request, res: Response) 
  * Roll dice (e.g., 2d6, 1d20)
  * Body: { dice: string (e.g., "2d6"), request_hash?: string }
  */
-app.post('/v1/random/dice', authMiddleware, async (req: Request, res: Response) => {
+app.post('/v1/random/dice', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
   try {
     const { dice, request_hash } = req.body;
 
