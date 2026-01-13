@@ -29,23 +29,25 @@ if ! docker info &>/dev/null 2>&1; then
 fi
 
 # Check Docker Hub login and get username
-DOCKER_USERNAME=""
+DOCKER_USERNAME=${DOCKER_USERNAME:-""}
 
-# Method 1: Try docker system info
-DOCKER_USERNAME=$(docker system info 2>/dev/null | grep -i "username" | awk '{print $2}' | head -1)
-
-# Method 2: Try docker info
 if [ -z "$DOCKER_USERNAME" ]; then
-	DOCKER_USERNAME=$(docker info 2>&1 | grep -i "username" | awk '{print $2}' | head -1)
-fi
+	# Method 1: Try docker system info
+	DOCKER_USERNAME=$(docker system info 2>/dev/null | grep -i "username" | awk '{print $2}' | head -1)
 
-# Method 3: Check docker config.json for auth
-if [ -z "$DOCKER_USERNAME" ]; then
-	if [ -f ~/.docker/config.json ]; then
-		# Try to get username from auths section (it's base64 encoded as user:pass)
-		AUTH=$(cat ~/.docker/config.json | python3 -c "import sys,json; d=json.load(sys.stdin); auths=d.get('auths',{}); hub=auths.get('https://index.docker.io/v1/',{}); print(hub.get('auth',''))" 2>/dev/null || echo "")
-		if [ -n "$AUTH" ]; then
-			DOCKER_USERNAME=$(echo "$AUTH" | base64 -d 2>/dev/null | cut -d: -f1 || echo "")
+	# Method 2: Try docker info
+	if [ -z "$DOCKER_USERNAME" ]; then
+		DOCKER_USERNAME=$(docker info 2>&1 | grep -i "username" | awk '{print $2}' | head -1)
+	fi
+
+	# Method 3: Check docker config.json for auth
+	if [ -z "$DOCKER_USERNAME" ]; then
+		if [ -f ~/.docker/config.json ]; then
+			# Try to get username from auths section (it's base64 encoded as user:pass)
+			AUTH=$(cat ~/.docker/config.json | python3 -c "import sys,json; d=json.load(sys.stdin); auths=d.get('auths',{}); hub=auths.get('https://index.docker.io/v1/',{}); print(hub.get('auth',''))" 2>/dev/null || echo "")
+			if [ -n "$AUTH" ]; then
+				DOCKER_USERNAME=$(echo "$AUTH" | base64 -d 2>/dev/null | cut -d: -f1 || echo "")
+			fi
 		fi
 	fi
 fi
@@ -108,8 +110,8 @@ fi
 PACKAGE_VERSION=$(cat package.json | grep '"version"' | cut -d'"' -f4)
 
 # Set defaults
-IMAGE_NAME="${DOCKER_USERNAME}/verified-randomness-service:v${PACKAGE_VERSION}"
-CVM_NAME="verified-randomness-service"
+IMAGE_NAME="${DOCKER_USERNAME}/verifiable-randomness-service:v${PACKAGE_VERSION}"
+CVM_NAME="verifiable-randomness-service"
 
 echo "Docker Image: $IMAGE_NAME"
 echo "CVM Name: $CVM_NAME"
@@ -265,10 +267,10 @@ echo "3. Test your endpoint: curl https://[app-id]-3000.dstack-pha-prod5.phala.n
 echo ""
 echo "4. Update apps/server/.env with:"
 echo "   RANDOMNESS_PROVIDER=phala"
-echo "   PHALA_CLOUD_ENDPOINT=https://[app-id]-3000.dstack-pha-prod5.phala.network"
+echo "   TEE_RANDOMNESS_ENDPOINT=https://[app-id]-3000.dstack-pha-prod5.phala.network"
 
 if [ "$NEW_KEYS_GENERATED" = true ]; then
-	echo "   PHALA_CLOUD_API_KEY=${API_KEY_PRIMARY}"
+	echo "   TEE_RANDOMNESS_API_KEY=${API_KEY_PRIMARY}"
 	echo ""
 	echo "Your API Keys (keep these secret!):"
 	echo "  Primary:   ${API_KEY_PRIMARY}"
@@ -278,7 +280,7 @@ if [ "$NEW_KEYS_GENERATED" = true ]; then
 	echo "IMPORTANT: These keys were just generated. Save them now!"
 	echo "           They will not be shown again."
 else
-	echo "   PHALA_CLOUD_API_KEY=<use your existing key from .env>"
+	echo "   TEE_RANDOMNESS_API_KEY=<use your existing key from .env>"
 	echo ""
 	echo "Using existing API keys from your .env file."
 fi
