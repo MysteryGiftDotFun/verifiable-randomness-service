@@ -4,21 +4,31 @@ import crypto from 'crypto';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import { DstackClient } from '@phala/dstack-sdk';
+// import { DstackClient } from '@phala/dstack-sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
+
+// Mock DstackClient for debugging
+class DstackClient {
+  async info() {
+    return null;
+  }
+  async getQuote(_data?: any) {
+    return { quote: 'mock', event_log: '' };
+  }
+}
 import { LRUCache } from 'lru-cache';
 import rateLimit from 'express-rate-limit';
-import * as Sentry from '@sentry/node';
+// import * as Sentry from '@sentry/node';
 
 // Initialize GlitchTip/Sentry monitoring
 if (process.env.GLITCHTIP_DSN) {
-  Sentry.init({
-    dsn: process.env.GLITCHTIP_DSN,
-    environment: process.env.NODE_ENV || 'development',
-    release: `tee-worker@${process.env.npm_package_version || '0.0.5'}`,
-    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-  });
-  console.log('[TEE] GlitchTip/Sentry monitoring initialized');
+  // Sentry.init({
+  //   dsn: process.env.GLITCHTIP_DSN,
+  //   environment: process.env.NODE_ENV || 'development',
+  //   release: `tee-worker@${process.env.npm_package_version || '0.0.5'}`,
+  //   tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+  // });
+  console.log('[TEE] GlitchTip/Sentry monitoring DISABLED for debugging');
 }
 
 const app = express();
@@ -26,19 +36,18 @@ const app = express();
 app.use(express.json());
 
 // Strict CORS configuration
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
-    ? [
-        'https://mysterygift.fun',
-        'https://rng.mysterygift.fun',
-        /\.mysterygift\.fun$/,
-      ]
-    : true, // Allow all in development
-  credentials: true,
-  optionsSuccessStatus: 200,
-}));
+app.use(
+  cors({
+    origin:
+      process.env.NODE_ENV === 'production'
+        ? ['https://mysterygift.fun', 'https://rng.mysterygift.fun', /\.mysterygift\.fun$/]
+        : true, // Allow all in development
+    credentials: true,
+    optionsSuccessStatus: 200,
+  })
+);
 
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
 // Configuration
 const PRICE_PER_REQUEST_CENTS = 1; // $0.01 per attestation
@@ -388,7 +397,7 @@ async function verifyX402Payment(paymentHeader: string): Promise<boolean> {
     if (tx.blockTime) {
       const now = Math.floor(Date.now() / 1000);
       const age = now - tx.blockTime;
-      
+
       // Reject if too old (>1h) OR from future (>5min clock skew tolerance)
       if (age > 3600 || age < -300) {
         console.warn(`[TEE] Invalid transaction age: ${age}s`);
@@ -400,7 +409,7 @@ async function verifyX402Payment(paymentHeader: string): Promise<boolean> {
       const conn = getPrimaryConnection();
       const currentSlot = await conn.getSlot();
       const txSlot = tx.slot || 0;
-      
+
       // Reject if older than ~80 seconds (200 slots * 400ms)
       if (currentSlot - txSlot > 200) {
         console.warn(`[TEE] Transaction slot too old: ${txSlot} vs ${currentSlot}`);
@@ -705,13 +714,13 @@ app.post('/v1/random/winners', paidLimiter, authMiddleware, async (req: Request,
       // Use 4 bytes for each random selection
       const offset = i * 4;
       const randomValue = randomBytes.readUInt32BE(offset % randomBytes.length);
-      
+
       // Select random index from remaining items
       const j = i + (randomValue % (itemsCopy.length - i));
-      
+
       // Swap selected item to position i
       [itemsCopy[i], itemsCopy[j]] = [itemsCopy[j], itemsCopy[i]];
-      
+
       // Add to winners with metadata
       winners.push({
         item: itemsCopy[i],
@@ -2756,7 +2765,11 @@ function renderStaticPage(title: string, content: string): string {
 app.get('/changelog', (_req: Request, res: Response) => {
   const changelogPath = path.join(__dirname, '../CHANGELOG.md');
   let md = '';
-  try { md = fs.readFileSync(changelogPath, 'utf-8'); } catch(e) { md = 'Changelog not found.'; }
+  try {
+    md = fs.readFileSync(changelogPath, 'utf-8');
+  } catch (e) {
+    md = 'Changelog not found.';
+  }
 
   let sections: string[] = [];
   let currentSection = '';
@@ -2767,57 +2780,72 @@ app.get('/changelog', (_req: Request, res: Response) => {
 
   for (const line of lines) {
     let l = line.trim();
-    
+
     // Header Detection
     if (l.startsWith('## ')) {
-       // New Version Block
-       if (inVersion) {
-          if (inList) { currentSection += '</ul>\n'; inList = false; }
-          sections.push(currentSection);
-       } else {
-          // End of preamble
-          if (inList) { preamble += '</ul>\n'; inList = false; }
-       }
-       inVersion = true;
-       currentSection = `<h2>${l.slice(3)}</h2>`;
+      // New Version Block
+      if (inVersion) {
+        if (inList) {
+          currentSection += '</ul>\n';
+          inList = false;
+        }
+        sections.push(currentSection);
+      } else {
+        // End of preamble
+        if (inList) {
+          preamble += '</ul>\n';
+          inList = false;
+        }
+      }
+      inVersion = true;
+      currentSection = `<h2>${l.slice(3)}</h2>`;
     }
     // Main Title (Skip or add to preamble)
     else if (l.startsWith('# ')) {
-       // Title usually "Changelog", we ignore it or add to preamble
-       continue;
+      // Title usually "Changelog", we ignore it or add to preamble
+      continue;
     }
     // Content Parsing
     else {
-       let htmlLine = '';
-       if (!l) {
-          if (inList) { htmlLine = '</ul>\n'; inList = false; }
-       }
-       else if (l.startsWith('### ')) {
-          if (inList) { htmlLine += '</ul>\n'; inList = false; }
-          htmlLine += `<h3>${l.slice(4)}</h3>`;
-       }
-       else if (l.startsWith('- ')) {
-          if (!inList) { htmlLine += '<ul>\n'; inList = true; }
-          let text = l.slice(2);
-          text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-          text = text.replace(/`([^`]*)`/g, '<code>$1</code>');
-          text = text.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>');
-          htmlLine += `<li>${text}</li>`;
-       }
-       else {
-          if (inList) { htmlLine += '</ul>\n'; inList = false; }
-          htmlLine += `<p>${l}</p>`;
-       }
-       
-       if (inVersion) currentSection += htmlLine;
-       else preamble += htmlLine;
+      let htmlLine = '';
+      if (!l) {
+        if (inList) {
+          htmlLine = '</ul>\n';
+          inList = false;
+        }
+      } else if (l.startsWith('### ')) {
+        if (inList) {
+          htmlLine += '</ul>\n';
+          inList = false;
+        }
+        htmlLine += `<h3>${l.slice(4)}</h3>`;
+      } else if (l.startsWith('- ')) {
+        if (!inList) {
+          htmlLine += '<ul>\n';
+          inList = true;
+        }
+        let text = l.slice(2);
+        text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        text = text.replace(/`([^`]*)`/g, '<code>$1</code>');
+        text = text.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>');
+        htmlLine += `<li>${text}</li>`;
+      } else {
+        if (inList) {
+          htmlLine += '</ul>\n';
+          inList = false;
+        }
+        htmlLine += `<p>${l}</p>`;
+      }
+
+      if (inVersion) currentSection += htmlLine;
+      else preamble += htmlLine;
     }
   }
-  
+
   // Push last section
-  if (inList) { 
-     if (inVersion) currentSection += '</ul>\n';
-     else preamble += '</ul>\n';
+  if (inList) {
+    if (inVersion) currentSection += '</ul>\n';
+    else preamble += '</ul>\n';
   }
   if (inVersion) sections.push(currentSection);
 
@@ -3009,6 +3037,15 @@ async function generateAttestation(seed: string, requestHash: string): Promise<s
 
 // Start server
 async function start() {
+  // Global error handler for uncaught exceptions
+  process.on('uncaughtException', (err) => {
+    console.error('[TEE] Uncaught Exception:', err);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('[TEE] Unhandled Rejection at:', promise, 'reason:', reason);
+  });
+
   // Try to detect TEE type via SDK info
   const dstack = getDstackClient();
   if (dstack) {
@@ -3029,7 +3066,7 @@ async function start() {
   // Serve static files
   app.use('/assets', express.static(path.join(__dirname, '../static')));
 
-  const server = app.listen(PORT, () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[TEE] Randomness Worker v2.8 running on port ${PORT}`);
     console.log(`[TEE] Environment: ${TEE_TYPE.toUpperCase()}`);
   });

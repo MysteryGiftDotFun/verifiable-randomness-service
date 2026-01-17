@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:20
 
 WORKDIR /app
 
@@ -7,8 +7,9 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Install build dependencies
 COPY package.json .
+COPY package-lock.json .
 COPY tsconfig.json .
-RUN npm install
+RUN npm ci
 
 # Copy source
 COPY src ./src
@@ -22,8 +23,9 @@ RUN npm run build
 RUN npm prune --production
 
 # Verify user (security best practice)
-USER node
+# USER node
 
+ENV PORT=3000
 EXPOSE 3000
 
 # Healthcheck

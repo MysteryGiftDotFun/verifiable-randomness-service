@@ -1,6 +1,6 @@
 services:
-  verified-randomness-service:
-    image: phantasybot/verified-randomness-service:v0.0.1
+  verifiable-randomness-service:
+    image: phantasybot/verifiable-randomness-service:v0.0.1-BETA
     ports:
       - '3000:3000'
     environment:
