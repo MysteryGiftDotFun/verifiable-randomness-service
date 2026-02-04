@@ -1,0 +1,25 @@
+services:
+  verifiable-randomness-service:
+    image: phantasybot/verifiable-randomness-service:v0.0.1-BETA
+    ports:
+      - '3000:3000'
+    environment:
+      - PORT=3000
+      - NODE_ENV=development
+      - PHALA_APP_ID=${PHALA_APP_ID:-}  # Set when deploying dev CVM
+      - PAYMENT_WALLET=${PAYMENT_WALLET:-}  # Devnet wallet
+      - WHITELIST=${WHITELIST:-localhost,dev.mysterygift.fun,api-dev.mysterygift.fun,rng-dev.mysterygift.fun}
+      - API_KEYS=${API_KEYS:-}
+      - HELIUS_RPC_URL=${HELIUS_RPC_URL:-}
+      - ALCHEMY_RPC_URL=${ALCHEMY_RPC_URL:-}
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      - GLITCHTIP_DSN=${GLITCHTIP_DSN:-}
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    restart: always
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/v1/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

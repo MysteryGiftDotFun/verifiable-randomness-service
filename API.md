@@ -50,20 +50,19 @@ X-API-Key: your-secret-key
 
 ### x402 Payment
 
-1. Send payment on Solana (≥0.0001 SOL or ≥0.01 USDC)
-2. Include proof in header:
+1. Create a payment intent via `POST /v1/payment/create` (specify `network`: `solana` or `base`)
+2. Complete payment through the facilitator payment URL
+3. Include proof in header:
 
 ```http
-X-Payment: x402 eyJ0eF9zaWduYXR1cmUiOiI1SjdLeS4uLiIsImFtb3VudCI6MSw...
+X-Payment: x402 eyJwYXltZW50SWQiOiJwYXlfYWJjMTIzIn0=
 ```
 
 **Proof structure** (before base64 encoding):
 
 ```json
 {
-  "tx_signature": "5J7Ky2mP...",
-  "amount": 1,
-  "payer": "YourWalletAddress"
+  "paymentId": "pay_abc123..."
 }
 ```
 
@@ -84,9 +83,9 @@ X-Payment: x402 eyJ0eF9zaWduYXR1cmUiOiI1SjdLeS4uLiIsImFtb3VudCI6MSw...
 
 ### Paid Endpoint Rate Limit
 
-- **Limit**: 20 requests/minute per payment signature
+- **Limit**: 20 requests/minute per payment ID
 - **Applies to**: POST `/v1/randomness`, `/v1/random/*`
-- **Key**: Payment transaction signature OR IP address
+- **Key**: Payment ID OR IP address
 
 ### Rate Limit Response
 
@@ -138,7 +137,7 @@ X-Payment: x402 eyJ0eF9zaWduYXR1cmUiOiI1SjdLeS4uLiIsImFtb3VudCI6MSw...
 | `400` | Bad Request           | Invalid input, missing parameters          |
 | `402` | Payment Required      | No valid payment proof provided            |
 | `429` | Too Many Requests     | Rate limit exceeded                        |
-| `500` | Internal Server Error | TEE error, RPC failure                     |
+| `500` | Internal Server Error | TEE error, facilitator unavailable         |
 | `502` | Bad Gateway           | TEE Worker unavailable (landing page only) |
 
 ---
@@ -630,22 +629,27 @@ if (attestation.type === 'tdx-attestation') {
 
 ## Best Practices
 
-### 1. Cache Payment Proofs
+### 1. Create Payment, Then Use
 
-Reuse the same payment transaction for multiple requests within the 1-hour window:
+Each payment ID is single-use. Create a new payment intent for each request:
 
 ```javascript
-const paymentProof = btoa(
-  JSON.stringify({
-    tx_signature: '5J7Ky...',
-    amount: 1,
-    payer: 'YourWallet',
-  })
-);
+// 1. Create payment intent
+const { paymentId, paymentUrl } = await fetch('/v1/payment/create', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ network: 'solana' }),
+}).then(r => r.json());
 
-// Use same proof for multiple requests
-await fetch('/v1/randomness', { headers: { 'X-Payment': `x402 ${paymentProof}` } });
-await fetch('/v1/random/number', { headers: { 'X-Payment': `x402 ${paymentProof}` } });
+// 2. Complete payment via paymentUrl (facilitator handles on-chain tx)
+
+// 3. Use paymentId in proof
+const proof = btoa(JSON.stringify({ paymentId }));
+const result = await fetch('/v1/randomness', {
+  method: 'POST',
+  headers: { 'X-Payment': `x402 ${proof}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ request_hash: 'my-request' }),
+}).then(r => r.json());
 ```
 
 ### 2. Handle Rate Limits

@@ -1,17 +1,40 @@
+/**
+ * Landing page for the Verifiable Randomness Service.
+ * Extracted from index.ts for maintainability.
+ *
+ * Payment flow uses facilitator-based x402 (chain-agnostic).
+ */
 
-export function renderLandingPage(
-  version: string,
-  appId: string,
-  composeHash: string,
-  nodeUrl: string,
-  paymentWallet: string,
-  facilitatorUrl: string,
-  environment: string = 'development',
-  supportedNetworks: string[] = ['solana']
-): string {
+export interface LandingConfig {
+  version: string;
+  teeType: string;
+  paymentWallet: string;
+  facilitatorUrl: string;
+  supportedNetworks: string[];
+  arweaveEnabled: boolean;
+  appId: string;
+  composeHash: string;
+  nodeUrl: string;
+  environment: string;
+}
+
+export function renderLandingPage(config: LandingConfig): string {
+  const {
+    version,
+    appId,
+    composeHash,
+    nodeUrl,
+    paymentWallet,
+    facilitatorUrl,
+    supportedNetworks,
+    arweaveEnabled,
+    environment,
+  } = config;
+
   const envBadgeClass = environment === 'production' ? 'production' : 'development';
   const envBadgeText = environment === 'production' ? 'PROD' : 'DEV';
   const networksJson = JSON.stringify(supportedNetworks);
+
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -37,79 +60,417 @@ export function renderLandingPage(
       --accent-glow: rgba(255, 77, 0, 0.2);
       --success: #34D399;
       --font: 'Sometype Mono', monospace;
-      --clip-cyber: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+
+      --clip-cyber: polygon(
+        10px 0, 100% 0,
+        100% calc(100% - 10px), calc(100% - 10px) 100%,
+        0 100%, 0 10px
+      );
     }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: var(--font); background-color: var(--bg); color: var(--text-main); height: 100vh; width: 100vw; overflow: hidden; }
-    .layout { display: grid; grid-template-columns: 1fr 450px; height: 100vh; width: 100%; overflow: hidden; }
-    .hero { position: relative; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; overflow: hidden; background-color: var(--bg); background-image: url("data:image/svg+xml,%3Csvg width='400' height='400' viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cstyle%3Etext { font-family: monospace; fill: %23ffffff; opacity: 0.02; font-weight: bold; user-select: none; }%3C/style%3E%3Ctext x='50' y='80' font-size='120' transform='rotate(15 50,80)'%3E?%3C/text%3E%3Ctext x='300' y='150' font-size='80' transform='rotate(-20 300,150)'%3E?%3C/text%3E%3Ctext x='150' y='300' font-size='160' transform='rotate(10 150,300)'%3E?%3C/text%3E%3Ctext x='350' y='350' font-size='60' transform='rotate(30 350,350)'%3E?%3C/text%3E%3Ctext x='100' y='200' font-size='40' opacity='0.04' transform='rotate(-45 100,200)'%3E?%3C/text%3E%3Ctext x='250' y='50' font-size='90' transform='rotate(5 250,50)'%3E?%3C/text%3E%3Ctext x='20' y='380' font-size='70' transform='rotate(-15 20,380)'%3E?%3C/text%3E%3C/svg%3E"); transition: background-position 0.1s linear; }
-    .wallet-container-hero { position: absolute; top: 1.5rem; right: 1.5rem; z-index: 100; }
-    .miss-container { position: absolute; bottom: -80px; left: 0; right: 0; z-index: 10; height: 90vh; display: flex; align-items: flex-end; justify-content: center; transition: transform 0.1s linear; }
-    .miss-img { height: 100%; max-height: 900px; object-fit: contain; object-position: bottom center; filter: drop-shadow(0 0 60px rgba(0,0,0,0.6)); transform: scaleX(-1); }
-    .hero-info { position: absolute; bottom: 3rem; left: 3.5rem; z-index: 20; max-width: 600px; }
-    h1 { font-size: 3.5rem; font-weight: 700; line-height: 0.9; letter-spacing: -0.04em; text-transform: uppercase; color: var(--text-main); margin-bottom: 0.8rem; text-shadow: 0 10px 30px rgba(0,0,0,0.8); }
-    .subtitle { font-size: 1rem; color: var(--accent); font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; display: flex; align-items: center; gap: 0.5rem; }
-    .subtitle::before { content: ''; display: block; width: 40px; height: 2px; background: var(--accent); }
-    .version-tag { position: absolute; bottom: 2rem; right: 2rem; font-size: 0.75rem; color: var(--text-muted); opacity: 0.5; font-weight: 600; z-index: 20; display: flex; align-items: center; gap: 0.5rem; }
-    .env-badge { display: inline-flex; align-items: center; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; opacity: 1; }
+
+    body {
+      font-family: var(--font);
+      background-color: var(--bg);
+      color: var(--text-main);
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+    }
+
+    /* Layout */
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 450px;
+      height: 100vh;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    /* Left Hero */
+    .hero {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      overflow: hidden;
+      background-color: var(--bg);
+      background-image: url("data:image/svg+xml,%3Csvg width='400' height='400' viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cstyle%3Etext { font-family: monospace; fill: %23ffffff; opacity: 0.02; font-weight: bold; user-select: none; }%3C/style%3E%3Ctext x='50' y='80' font-size='120' transform='rotate(15 50,80)'%3E?%3C/text%3E%3Ctext x='300' y='150' font-size='80' transform='rotate(-20 300,150)'%3E?%3C/text%3E%3Ctext x='150' y='300' font-size='160' transform='rotate(10 150,300)'%3E?%3C/text%3E%3Ctext x='350' y='350' font-size='60' transform='rotate(30 350,350)'%3E?%3C/text%3E%3Ctext x='100' y='200' font-size='40' opacity='0.04' transform='rotate(-45 100,200)'%3E?%3C/text%3E%3Ctext x='250' y='50' font-size='90' transform='rotate(5 250,50)'%3E?%3C/text%3E%3Ctext x='20' y='380' font-size='70' transform='rotate(-15 20,380)'%3E?%3C/text%3E%3C/svg%3E");
+      transition: background-position 0.1s linear;
+    }
+
+    .wallet-container-hero {
+      position: absolute;
+      top: 1.5rem;
+      right: 1.5rem;
+      z-index: 100;
+    }
+
+    .miss-container {
+      position: absolute;
+      bottom: -80px;
+      left: 0;
+      right: 0;
+      z-index: 10;
+      height: 90vh;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      transition: transform 0.1s linear;
+    }
+
+    .miss-img {
+      height: 100%;
+      max-height: 900px;
+      object-fit: contain;
+      object-position: bottom center;
+      filter: drop-shadow(0 0 60px rgba(0,0,0,0.6));
+      transform: scaleX(-1);
+    }
+
+    .hero-info {
+      position: absolute;
+      bottom: 3rem;
+      left: 3.5rem;
+      z-index: 20;
+      max-width: 600px;
+    }
+
+    h1 {
+      font-size: 3.5rem;
+      font-weight: 700;
+      line-height: 0.9;
+      letter-spacing: -0.04em;
+      text-transform: uppercase;
+      color: var(--text-main);
+      margin-bottom: 0.8rem;
+      text-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    }
+
+    .subtitle {
+      font-size: 1rem;
+      color: var(--accent);
+      font-weight: 600;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .subtitle::before {
+      content: '';
+      display: block;
+      width: 40px;
+      height: 2px;
+      background: var(--accent);
+    }
+
+    .version-tag {
+      position: absolute;
+      bottom: 2rem;
+      right: 2rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      opacity: 0.5;
+      font-weight: 600;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .env-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      opacity: 1;
+    }
     .env-badge.production { background: rgba(52, 211, 153, 0.2); color: #34D399; }
     .env-badge.development { background: rgba(255, 149, 0, 0.2); color: #FF9500; }
-    .panel { background: var(--panel-bg); border-left: 1px solid var(--panel-border); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); display: flex; flex-direction: column; position: relative; z-index: 50; height: 100vh; }
-    .wallet-btn { background: rgba(0,0,0,0.4); color: var(--text-main); border: 1px solid var(--panel-border); padding: 0.7rem 1.2rem; border-radius: 8px; font-family: var(--font); font-size: 0.85rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 0.6rem; transition: all 0.2s; }
+
+    .panel {
+      background: var(--panel-bg);
+      border-left: 1px solid var(--panel-border);
+      backdrop-filter: blur(30px);
+      -webkit-backdrop-filter: blur(30px);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      z-index: 50;
+      height: 100vh;
+    }
+
+    .wallet-btn {
+      background: rgba(0,0,0,0.4);
+      color: var(--text-main);
+      border: 1px solid var(--panel-border);
+      padding: 0.7rem 1.2rem;
+      border-radius: 8px;
+      font-family: var(--font);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      transition: all 0.2s;
+    }
     .wallet-btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); }
     .wallet-btn.connected { background: rgba(52, 211, 153, 0.1); border-color: rgba(52, 211, 153, 0.3); color: var(--success); }
-    .tabs { display: flex; gap: 0.2rem; padding: 0.5rem 2rem 0; margin-bottom: 1.5rem; border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
-    .tab-btn { padding: 0.8rem 1.2rem; background: transparent; color: var(--text-muted); border: none; font-family: var(--font); font-weight: 500; font-size: 0.85rem; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+
+    .tabs {
+      display: flex;
+      gap: 0.2rem;
+      padding: 0.5rem 2rem 0;
+      margin-bottom: 1.5rem;
+      border-bottom: 1px solid var(--panel-border);
+      flex-shrink: 0;
+    }
+
+    .tab-btn {
+      padding: 0.8rem 1.2rem;
+      background: transparent;
+      color: var(--text-muted);
+      border: none;
+      font-family: var(--font);
+      font-weight: 500;
+      font-size: 0.85rem;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
     .tab-btn.active { color: var(--text-main); border-bottom-color: var(--accent); }
     .tab-btn:hover:not(.active) { color: var(--text-main); }
-    .content-wrapper { flex: 1; overflow-y: auto; padding: 0 1.5rem 1.5rem; display: flex; flex-direction: column; }
+
+    .content-wrapper {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 1.5rem 1.5rem;
+      display: flex;
+      flex-direction: column;
+    }
+
     .content-wrapper::-webkit-scrollbar { width: 4px; }
     .content-wrapper::-webkit-scrollbar-track { background: transparent; }
     .content-wrapper::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
     .content-wrapper::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
     .tab-view { display: none; width: 100%; }
     .tab-view.active { display: block; animation: fadeIn 0.3s ease; }
-    .card { background: rgba(0, 0, 0, 0.3); border: 1px solid var(--panel-border); border-radius: 12px; padding: 1.2rem; margin-bottom: 1.5rem; }
-    .card-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.8rem; display: block; font-weight: 600; letter-spacing: 0.05em; }
-    .sleek-input { width: 100%; padding: 0.9rem; background: rgba(0,0,0,0.4); color: var(--text-main); border: 1px solid var(--panel-border); border-radius: 8px; font-family: var(--font); font-size: 0.9rem; margin-bottom: 1rem; outline: none; transition: all 0.2s; }
+
+    .card {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 1.2rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .card-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-bottom: 0.8rem;
+      display: block;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+
+    .sleek-input {
+      width: 100%;
+      padding: 0.9rem;
+      background: rgba(0,0,0,0.4);
+      color: var(--text-main);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      font-family: var(--font);
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+      outline: none;
+      transition: all 0.2s;
+    }
+
     .sleek-select { display: none; }
-    .custom-dropdown { position: relative; width: 100%; margin-bottom: 1rem; font-family: var(--font); }
-    .dropdown-selected { width: 100%; padding: 0.9rem 2.5rem 0.9rem 0.9rem; background-color: rgba(0,0,0,0.5); color: var(--text-main); border: 1px solid var(--panel-border); border-radius: 8px; font-family: var(--font); font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease; position: relative; }
-    .dropdown-selected::after { content: ''; position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath fill='%23FF4D00' d='M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z'/%3E%3C/svg%3E"); background-size: contain; transition: transform 0.2s ease; }
+
+    .custom-dropdown {
+      position: relative;
+      width: 100%;
+      margin-bottom: 1rem;
+      font-family: var(--font);
+    }
+    .dropdown-selected {
+      width: 100%;
+      padding: 0.9rem 2.5rem 0.9rem 0.9rem;
+      background-color: rgba(0,0,0,0.5);
+      color: var(--text-main);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      font-family: var(--font);
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+    .dropdown-selected::after {
+      content: '';
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 16px;
+      height: 16px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath fill='%23FF4D00' d='M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z'/%3E%3C/svg%3E");
+      background-size: contain;
+      transition: transform 0.2s ease;
+    }
     .custom-dropdown.open .dropdown-selected::after { transform: translateY(-50%) rotate(180deg); }
     .dropdown-selected:hover { border-color: rgba(255, 255, 255, 0.2); background-color: rgba(0,0,0,0.6); }
     .custom-dropdown.open .dropdown-selected { border-color: var(--accent); background-color: rgba(0,0,0,0.7); box-shadow: 0 0 0 2px var(--accent-glow); border-radius: 8px 8px 0 0; }
-    .dropdown-options { display: none; position: absolute; top: 100%; left: 0; right: 0; background-color: #141417; border: 1px solid var(--accent); border-top: none; border-radius: 0 0 8px 8px; overflow: hidden; z-index: 100; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .dropdown-options {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background-color: #141417;
+      border: 1px solid var(--accent);
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+      overflow: hidden;
+      z-index: 100;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
     .custom-dropdown.open .dropdown-options { display: block; animation: dropdownFadeIn 0.2s ease; }
-    .dropdown-option { padding: 0.9rem; color: var(--text-muted); cursor: pointer; transition: all 0.15s ease; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.9rem; }
+    .dropdown-option {
+      padding: 0.9rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      font-size: 0.9rem;
+    }
     .dropdown-option:last-child { border-bottom: none; }
     .dropdown-option:hover { background-color: rgba(255, 77, 0, 0.15); color: var(--text-main); padding-left: 1.2rem; }
     .dropdown-option.selected { background-color: var(--accent); color: white; }
     @keyframes dropdownFadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
     .sleek-input:focus { border-color: var(--accent); background-color: rgba(0,0,0,0.6); }
-    .cyber-btn { width: 100%; padding: 1.4rem; background: var(--text-main); color: #000; border: none; font-family: var(--font); font-weight: 700; text-transform: uppercase; cursor: pointer; clip-path: var(--clip-cyber); transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 0.6rem; font-size: 1rem; margin-top: 1rem; position: relative; overflow: hidden; }
+
+    .cyber-btn {
+      width: 100%;
+      padding: 1.4rem;
+      background: var(--text-main);
+      color: #000;
+      border: none;
+      font-family: var(--font);
+      font-weight: 700;
+      text-transform: uppercase;
+      cursor: pointer;
+      clip-path: var(--clip-cyber);
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      font-size: 1rem;
+      margin-top: 1rem;
+      position: relative;
+      overflow: hidden;
+    }
     .cyber-btn:hover { background: var(--accent); color: white; text-shadow: 0 1px 2px rgba(0,0,0,0.2); transform: translateY(-1px); }
     .cyber-btn:disabled { opacity: 0.5; cursor: not-allowed; background: var(--text-muted); transform: none; }
     .cyber-btn::before { content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent); transition: 0.5s; }
     .cyber-btn:hover::before { left: 100%; }
-    .std-btn { width: 100%; padding: 0.9rem; background: rgba(255,255,255,0.05); border: 1px solid var(--panel-border); border-radius: 8px; color: var(--text-main); font-family: var(--font); font-weight: 600; cursor: pointer; transition: all 0.2s; }
+
+    .std-btn {
+      width: 100%;
+      padding: 0.9rem;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      color: var(--text-main);
+      font-family: var(--font);
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
     .std-btn:hover { background: rgba(255,255,255,0.1); border-color: var(--text-main); }
-    .toggle-group { display: flex; background: rgba(0,0,0,0.4); padding: 4px; border-radius: 8px; margin-bottom: 1.5rem; }
-    .toggle-opt { flex: 1; padding: 0.6rem; border: none; background: transparent; color: var(--text-muted); border-radius: 6px; font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: all 0.2s; font-family: var(--font); }
+
+    .toggle-group {
+      display: flex;
+      background: rgba(0,0,0,0.4);
+      padding: 4px;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+    }
+    .toggle-opt {
+      flex: 1;
+      padding: 0.6rem;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: var(--font);
+    }
     .toggle-opt.active { background: rgba(255,255,255,0.1); color: var(--text-main); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-    .footer-spacer { margin-top: auto; }
-    .console-bar { background: #050505; border-top: 1px solid var(--panel-border); color: var(--text-muted); font-family: monospace; font-size: 0.75rem; cursor: pointer; transition: height 0.3s ease; height: 34px; overflow: hidden; flex-shrink: 0; }
+
+    .console-bar {
+      background: #050505;
+      border-top: 1px solid var(--panel-border);
+      color: var(--text-muted);
+      font-family: monospace;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: height 0.3s ease;
+      height: 34px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
     .console-header { padding: 0.6rem 2rem; display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.02); }
     .console-indicator { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 5px var(--success); }
     .console-content { padding: 0 2rem 1rem; overflow-y: auto; height: 160px; }
     .console-bar.expanded { height: 200px; }
-    .legal-footer { padding: 1rem 2rem; font-size: 0.7rem; color: var(--text-muted); text-align: center; border-top: 1px solid var(--panel-border); background: var(--panel-bg); flex-shrink: 0; }
+
+    .legal-footer {
+      padding: 1rem 2rem;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      text-align: center;
+      border-top: 1px solid var(--panel-border);
+      background: var(--panel-bg);
+      flex-shrink: 0;
+    }
+
     .log-line { margin-bottom: 4px; }
     .log-success { color: var(--success); }
     .log-error { color: #F87171; }
     .log-info { color: #A5B4FC; }
-    .hash-display { font-family: monospace; font-size: 0.75rem; color: var(--text-muted); word-break: break-all; background: rgba(0,0,0,0.4); padding: 1rem; border-radius: 8px; border: 1px solid var(--panel-border); }
 
+    .hash-display {
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      word-break: break-all;
+      background: rgba(0,0,0,0.4);
+      padding: 1rem;
+      border-radius: 8px;
+      border: 1px solid var(--panel-border);
+    }
+
+    /* Responsive */
     @media (max-width: 1024px) {
       .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; overflow-y: auto; }
       .hero { height: 50vh; min-height: 400px; border-bottom: 1px solid var(--panel-border); justify-content: flex-end; }
@@ -121,6 +482,7 @@ export function renderLandingPage(
       .content-wrapper { padding: 0 1.5rem 2rem; }
       .console-bar { display: none; }
     }
+
     @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
     .receipt-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: none; justify-content: center; align-items: center; z-index: 1000; padding: 1rem; }
@@ -170,12 +532,11 @@ export function renderLandingPage(
       </div>
 
       <div class="miss-container" id="miss-container">
-        <!-- CF Worker serves assets from root -->
         <img src="/assets/miss.png" class="miss-img" alt="Miss">
       </div>
 
       <a href="/changelog" class="version-tag" style="text-decoration:none; cursor:pointer;">
-        v${version} • ${composeHash.slice(0, 8)}
+        v${version} &bull; ${composeHash.slice(0, 8)}
         <span class="env-badge ${envBadgeClass}">${envBadgeText}</span>
       </a>
     </div>
@@ -279,6 +640,15 @@ export function renderLandingPage(
             <p style="font-size:0.8rem; color:var(--text-muted); margin:0;">
               NFT Mints &bull; Gacha / Loot &bull; Casino Games &bull; Tournaments &bull; PvP Selection
             </p>
+          </div>
+
+          <div class="card">
+            <span class="card-label">Service Info</span>
+            <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.7;">
+              <div>Arweave Proofs: <strong style="color:var(--text-main);">${arweaveEnabled ? 'Enabled' : 'Disabled'}</strong></div>
+              <div>Networks: <strong style="color:var(--text-main);">${supportedNetworks.join(', ')}</strong></div>
+              <div>Facilitator: <strong style="color:var(--text-main);">PayAI</strong></div>
+            </div>
           </div>
         </div>
 
@@ -397,6 +767,7 @@ export function renderLandingPage(
     const FACILITATOR_URL = '${facilitatorUrl}';
     const SUPPORTED_NETWORKS = ${networksJson};
 
+    // State
     let selectedNetwork = SUPPORTED_NETWORKS[0] || 'solana';
     let wallet = null;
     let consoleExpanded = false;
@@ -468,6 +839,7 @@ export function renderLandingPage(
       chevron.setAttribute('icon', consoleExpanded ? 'ph:caret-down-bold' : 'ph:caret-up-bold');
     }
 
+    // Parallax
     const hero = document.getElementById('hero-section');
     const miss = document.getElementById('miss-container');
     if(hero && window.innerWidth > 1024) {
@@ -506,15 +878,32 @@ export function renderLandingPage(
       if(!wallet) return;
       const type = document.getElementById('op-type').value;
       log('Initializing ' + type.toUpperCase() + '...');
-      let receiptData = { request_id: 'req-' + Date.now(), timestamp: new Date().toISOString(), type: type.toUpperCase(), wallet: wallet, network: selectedNetwork };
+
+      let receiptData = {
+        request_id: 'req-' + Date.now(),
+        timestamp: new Date().toISOString(),
+        type: type.toUpperCase(),
+        wallet: wallet,
+        network: selectedNetwork,
+      };
+
       try {
         // 1. Create payment intent via facilitator
         log('Creating payment intent (' + selectedNetwork + ')...');
-        const payRes = await fetch('/v1/payment/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ network: selectedNetwork }) });
+        const payRes = await fetch('/v1/payment/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ network: selectedNetwork }),
+        });
         const payData = await payRes.json();
         if (payData.error) throw new Error(payData.error);
+
         const { paymentId, paymentUrl } = payData;
-        receiptData.payment = { method: 'x402 (' + selectedNetwork + ')', amount: '$0.01', paymentId: paymentId };
+        receiptData.payment = {
+          method: 'x402 (' + selectedNetwork + ')',
+          amount: '$0.01',
+          paymentId: paymentId,
+        };
 
         // 2. Open facilitator payment page in popup
         log('Opening payment window...');
@@ -523,78 +912,300 @@ export function renderLandingPage(
         // 3. Poll for payment completion
         log('Waiting for payment confirmation...');
         let paid = false;
-        for (let i = 0; i < 60; i++) {
+        const maxAttempts = 60; // 5 minutes (5s intervals)
+        for (let i = 0; i < maxAttempts; i++) {
           await new Promise(r => setTimeout(r, 5000));
-          if (popup && popup.closed && !paid) await new Promise(r => setTimeout(r, 3000));
+
+          // Check if popup was closed without paying
+          if (popup && popup.closed && !paid) {
+            // Give a few more seconds in case payment was just submitted
+            await new Promise(r => setTimeout(r, 3000));
+          }
+
           try {
             const checkRes = await fetch('/v1/payment/create?check=' + paymentId);
             const checkData = await checkRes.json();
-            if (checkData.status === 'completed') { paid = true; receiptData.payment.transactionHash = checkData.transactionHash; break; }
-            if (checkData.status === 'expired' || checkData.status === 'failed') throw new Error('Payment ' + checkData.status);
-          } catch(pollErr) { if (pollErr.message.includes('expired') || pollErr.message.includes('failed')) throw pollErr; }
-          if (popup && popup.closed && i > 2) throw new Error('Payment window closed before completion');
+            if (checkData.status === 'completed') {
+              paid = true;
+              receiptData.payment.transactionHash = checkData.transactionHash;
+              break;
+            }
+            if (checkData.status === 'expired' || checkData.status === 'failed') {
+              throw new Error('Payment ' + checkData.status);
+            }
+          } catch(pollErr) {
+            if (pollErr.message.includes('expired') || pollErr.message.includes('failed')) throw pollErr;
+          }
+
+          if (popup && popup.closed && i > 2) {
+            throw new Error('Payment window closed before completion');
+          }
         }
+
         if (!paid) throw new Error('Payment timed out');
         if (popup && !popup.closed) popup.close();
+
         log('Payment confirmed', 'success');
 
-        // 4. Prepare request
+        // 4. Prepare Request
         const proof = { paymentId: paymentId, network: selectedNetwork, payer: wallet, timestamp: Date.now() };
         let body = { request_hash: receiptData.request_id };
         let endpoint = '/v1/randomness';
-        if (type === 'number') { endpoint = '/v1/random/number'; body.min = parseInt(document.getElementById('in-min').value) || 1; body.max = parseInt(document.getElementById('in-max').value) || 100; receiptData.params = { min: body.min, max: body.max }; }
-        else if (type === 'dice') { endpoint = '/v1/random/dice'; body.dice = document.getElementById('in-dice').value || '2d6'; receiptData.params = { dice: body.dice }; }
-        else if (type === 'pick') { endpoint = '/v1/random/pick'; body.items = (document.getElementById('in-items').value || 'A,B,C').split(',').map(s=>s.trim()); receiptData.params = { items: body.items }; }
 
-        // 5. Call API
+        if (type === 'number') {
+          endpoint = '/v1/random/number';
+          body.min = parseInt(document.getElementById('in-min').value) || 1;
+          body.max = parseInt(document.getElementById('in-max').value) || 100;
+          receiptData.params = { min: body.min, max: body.max };
+        } else if (type === 'dice') {
+          endpoint = '/v1/random/dice';
+          body.dice = document.getElementById('in-dice').value || '2d6';
+          receiptData.params = { dice: body.dice };
+        } else if (type === 'pick') {
+          endpoint = '/v1/random/pick';
+          body.items = (document.getElementById('in-items').value || 'A,B,C').split(',').map(s=>s.trim());
+          receiptData.params = { items: body.items };
+        }
+
+        // 5. Call API with payment proof
         log('Requesting TEE randomness...');
-        const res = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json', 'X-Payment':'x402 '+btoa(JSON.stringify(proof))}, body:JSON.stringify(body) });
+        const res = await fetch(endpoint, {
+          method:'POST',
+          headers:{
+            'Content-Type':'application/json',
+            'X-Payment':'x402 '+btoa(JSON.stringify(proof)),
+          },
+          body:JSON.stringify(body)
+        });
         const data = await res.json();
         if(data.error) throw new Error(data.error);
-        receiptData.result = { random_seed: data.random_seed, tee_type: data.tee_type, attestation: data.attestation };
+
+        // 6. Store result
+        receiptData.result = {
+          random_seed: data.random_seed,
+          tee_type: data.tee_type,
+          attestation: data.attestation
+        };
+
         if (data.number !== undefined) receiptData.result.value = data.number;
         if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
         if (data.picked !== undefined) receiptData.result.value = data.picked;
+
+        // 7. Auto-verify attestation
         log('Verifying attestation...');
         try {
           const attRes = await fetch('/v1/attestation');
           const attData = await attRes.json();
-          receiptData.attestation = { app_id: attData.app_id, compose_hash: attData.compose_hash || 'Simulation Mode', tee_type: attData.tee_type };
+          receiptData.attestation = {
+            app_id: attData.app_id,
+            compose_hash: attData.compose_hash || 'Simulation Mode',
+            tee_type: attData.tee_type
+          };
+
           if (attData.quote_hex) {
-            const verifyRes = await fetch('/v1/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({quote_hex: attData.quote_hex}) });
+            const verifyRes = await fetch('/v1/verify', {
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({quote_hex: attData.quote_hex})
+            });
             const verifyData = await verifyRes.json();
-            receiptData.verification = { valid: verifyData.valid, verified_by: 'Phala Cloud Attestation API', verified_at: new Date().toISOString() };
-          } else { receiptData.verification = { valid: false, note: 'Simulation mode - no hardware attestation' }; }
-        } catch(e) { receiptData.verification = { valid: false, error: e.message }; }
+            receiptData.verification = {
+              valid: verifyData.valid,
+              verified_by: 'Phala Cloud Attestation API',
+              verified_at: new Date().toISOString()
+            };
+          } else {
+            receiptData.verification = { valid: false, note: 'Simulation mode - no hardware attestation' };
+          }
+        } catch(e) {
+          receiptData.verification = { valid: false, error: e.message };
+        }
+
         log('Complete!', 'success');
         showReceipt(receiptData);
-      } catch(e) { log(e.message, 'error'); }
+
+      } catch(e) {
+        log(e.message, 'error');
+      }
     }
 
+    // Receipt Modal Functions
     function showReceipt(data) {
       const overlay = document.getElementById('receipt-overlay');
       const content = document.getElementById('receipt-content');
+
       let resultDisplay = data.result.random_seed || 'N/A';
-      if (data.result.value !== undefined) resultDisplay = String(data.result.value);
-      const txLink = data.payment.transactionHash ? (data.network === 'base' ? 'https://basescan.org/tx/' + data.payment.transactionHash : 'https://solscan.io/tx/' + data.payment.transactionHash) : null;
+      if (data.result.value !== undefined) {
+        resultDisplay = String(data.result.value);
+      }
+
+      const txLink = data.payment.transactionHash
+        ? (data.network === 'base'
+          ? 'https://basescan.org/tx/' + data.payment.transactionHash
+          : 'https://solscan.io/tx/' + data.payment.transactionHash)
+        : null;
+
       content.innerHTML = \`
-        <div class="receipt-header"><h3><iconify-icon icon="ph:check-circle-fill"></iconify-icon> TEE Randomness Receipt</h3><button class="receipt-close" onclick="closeReceipt()">&times;</button></div>
-        <div class="receipt-section"><div class="receipt-section-title">Request</div><div class="receipt-row"><span class="receipt-label">ID</span><span class="receipt-value">\\\${data.request_id}</span></div><div class="receipt-row"><span class="receipt-label">Time</span><span class="receipt-value">\\\${new Date(data.timestamp).toLocaleString()}</span></div><div class="receipt-row"><span class="receipt-label">Type</span><span class="receipt-value highlight">\\\${data.type}</span></div></div>
-        <div class="receipt-section" style="text-align: center; padding: 1.5rem 2rem;"><div class="receipt-section-title">Result</div><div class="receipt-result">\\\${resultDisplay}</div></div>
-        <div class="receipt-section"><div class="receipt-section-title">Payment</div><div class="receipt-row"><span class="receipt-label">Method</span><span class="receipt-value">\\\${data.payment.method}</span></div><div class="receipt-row"><span class="receipt-label">Amount</span><span class="receipt-value">\\\${data.payment.amount}</span></div>\\\${txLink ? '<div class="receipt-row"><span class="receipt-label">TX</span><a class="receipt-link" href="' + txLink + '" target="_blank">' + data.payment.transactionHash.slice(0,8) + '...' + data.payment.transactionHash.slice(-6) + '<iconify-icon icon="ph:arrow-square-out"></iconify-icon></a></div>' : '<div class="receipt-row"><span class="receipt-label">Payment ID</span><span class="receipt-value">' + data.payment.paymentId.slice(0,16) + '...</span></div>'}</div>
-        <div class="receipt-section"><div class="receipt-section-title">Attestation</div><div class="receipt-row"><span class="receipt-label">TEE Type</span><span class="receipt-value">\\\${data.attestation?.tee_type || 'simulation'}</span></div><div class="receipt-row"><span class="receipt-label">App ID</span><span class="receipt-value">\\\${(data.attestation?.app_id || 'N/A').slice(0, 16)}...</span></div><div class="receipt-row"><span class="receipt-label">Compose Hash</span><span class="receipt-value">\\\${(data.attestation?.compose_hash || 'N/A').slice(0, 12)}...</span></div><div class="receipt-row" style="margin-top: 0.75rem;"><span class="receipt-label">Status</span>\\\${data.verification?.valid ? '<span class="verification-badge"><iconify-icon icon="ph:seal-check-fill"></iconify-icon> Hardware Verified</span>' : '<span class="receipt-value" style="color: var(--text-muted);">Simulation Mode</span>'}</div></div>
-        <div class="receipt-actions"><button class="receipt-btn receipt-btn-secondary" onclick="copyReceipt()"><iconify-icon icon="ph:copy"></iconify-icon> Copy</button><button class="receipt-btn receipt-btn-secondary" onclick="downloadReceipt()"><iconify-icon icon="ph:download-simple"></iconify-icon> Download</button><button class="receipt-btn receipt-btn-primary" onclick="closeReceipt()">Done</button></div>
+        <div class="receipt-header">
+          <h3><iconify-icon icon="ph:check-circle-fill"></iconify-icon> TEE Randomness Receipt</h3>
+          <button class="receipt-close" onclick="closeReceipt()">&times;</button>
+        </div>
+
+        <div class="receipt-section">
+          <div class="receipt-section-title">Request</div>
+          <div class="receipt-row">
+            <span class="receipt-label">ID</span>
+            <span class="receipt-value">\${data.request_id}</span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-label">Time</span>
+            <span class="receipt-value">\${new Date(data.timestamp).toLocaleString()}</span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-label">Type</span>
+            <span class="receipt-value highlight">\${data.type}</span>
+          </div>
+        </div>
+
+        <div class="receipt-section" style="text-align: center; padding: 1.5rem 2rem;">
+          <div class="receipt-section-title">Result</div>
+          <div class="receipt-result">\${resultDisplay}</div>
+        </div>
+
+        <div class="receipt-section">
+          <div class="receipt-section-title">Payment</div>
+          <div class="receipt-row">
+            <span class="receipt-label">Method</span>
+            <span class="receipt-value">\${data.payment.method}</span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-label">Amount</span>
+            <span class="receipt-value">\${data.payment.amount}</span>
+          </div>
+          \${txLink ? \`<div class="receipt-row">
+            <span class="receipt-label">TX</span>
+            <a class="receipt-link" href="\${txLink}" target="_blank">
+              \${data.payment.transactionHash.slice(0,8)}...\${data.payment.transactionHash.slice(-6)}
+              <iconify-icon icon="ph:arrow-square-out"></iconify-icon>
+            </a>
+          </div>\` : \`<div class="receipt-row">
+            <span class="receipt-label">Payment ID</span>
+            <span class="receipt-value">\${data.payment.paymentId.slice(0,16)}...</span>
+          </div>\`}
+        </div>
+
+        <div class="receipt-section">
+          <div class="receipt-section-title">Attestation</div>
+          <div class="receipt-row">
+            <span class="receipt-label">TEE Type</span>
+            <span class="receipt-value">\${data.attestation?.tee_type || 'simulation'}</span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-label">App ID</span>
+            <span class="receipt-value">\${(data.attestation?.app_id || 'N/A').slice(0, 16)}...</span>
+          </div>
+          <div class="receipt-row">
+            <span class="receipt-label">Compose Hash</span>
+            <span class="receipt-value">\${(data.attestation?.compose_hash || 'N/A').slice(0, 12)}...</span>
+          </div>
+          <div class="receipt-row" style="margin-top: 0.75rem;">
+            <span class="receipt-label">Status</span>
+            \${data.verification?.valid
+              ? '<span class="verification-badge"><iconify-icon icon="ph:seal-check-fill"></iconify-icon> Hardware Verified</span>'
+              : '<span class="receipt-value" style="color: var(--text-muted);">Simulation Mode</span>'
+            }
+          </div>
+        </div>
+
+        <div class="receipt-actions">
+          <button class="receipt-btn receipt-btn-secondary" onclick="copyReceipt()">
+            <iconify-icon icon="ph:copy"></iconify-icon> Copy
+          </button>
+          <button class="receipt-btn receipt-btn-secondary" onclick="downloadReceipt()">
+            <iconify-icon icon="ph:download-simple"></iconify-icon> Download
+          </button>
+          <button class="receipt-btn receipt-btn-primary" onclick="closeReceipt()">
+            Done
+          </button>
+        </div>
       \`;
+
       window.currentReceipt = data;
       overlay.classList.add('visible');
     }
-    function closeReceipt() { document.getElementById('receipt-overlay').classList.remove('visible'); }
-    function copyReceipt() { if (!window.currentReceipt) return; navigator.clipboard.writeText(JSON.stringify(window.currentReceipt, null, 2)).then(() => showToast('Receipt copied to clipboard!')); }
-    function downloadReceipt() { if (!window.currentReceipt) return; const d = JSON.stringify(window.currentReceipt, null, 2); const blob = new Blob([d], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'tee-receipt-' + window.currentReceipt.request_id + '.json'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); showToast('Receipt downloaded!'); }
-    function showToast(message) { const toast = document.getElementById('toast'); toast.innerText = message; toast.classList.add('visible'); setTimeout(() => toast.classList.remove('visible'), 2500); }
-    async function verify() { const btn = document.getElementById('verify-btn'); btn.innerText = 'Verifying...'; try { const att = await fetch('/v1/attestation').then(r=>r.json()); const res = await fetch('/v1/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({quote_hex:att.quote_hex}) }).then(r=>r.json()); const box = document.getElementById('verify-res'); box.style.display = 'block'; if(res.valid) box.innerHTML = '<div class="log-success">>> HARDWARE SIGNATURE VALIDATED<br>Intel TDX Enclave Confirmed</div>'; else throw new Error('Invalid'); } catch(e) { document.getElementById('verify-res').innerHTML = '<div class="log-error">>> VERIFICATION FAILED</div>'; } btn.innerText = 'Verify Attestation Signature'; }
-    (async function loadComposeHash() { try { const res = await fetch('/v1/attestation'); const data = await res.json(); const hashEl = document.getElementById('compose-hash'); if (data.compose_hash) hashEl.innerText = data.compose_hash; else if (data.error) hashEl.innerText = 'TEE: ' + (data.tee_type || 'simulation'); else hashEl.innerText = 'Simulation Mode (No TEE)'; } catch(e) { document.getElementById('compose-hash').innerText = 'Failed to load'; } })();
 
+    function closeReceipt() {
+      document.getElementById('receipt-overlay').classList.remove('visible');
+    }
+
+    function copyReceipt() {
+      if (!window.currentReceipt) return;
+      const text = JSON.stringify(window.currentReceipt, null, 2);
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('Receipt copied to clipboard!');
+      });
+    }
+
+    function downloadReceipt() {
+      if (!window.currentReceipt) return;
+      const data = JSON.stringify(window.currentReceipt, null, 2);
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'tee-receipt-' + window.currentReceipt.request_id + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Receipt downloaded!');
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.innerText = message;
+      toast.classList.add('visible');
+      setTimeout(() => toast.classList.remove('visible'), 2500);
+    }
+
+    async function verify() {
+      const btn = document.getElementById('verify-btn');
+      btn.innerText = 'Verifying...';
+      try {
+        const att = await fetch('/v1/attestation').then(r=>r.json());
+        const res = await fetch('/v1/verify', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({quote_hex:att.quote_hex})
+        }).then(r=>r.json());
+
+        const box = document.getElementById('verify-res');
+        box.style.display = 'block';
+        if(res.valid) box.innerHTML = '<div class="log-success">>> HARDWARE SIGNATURE VALIDATED<br>Intel TDX Enclave Confirmed</div>';
+        else throw new Error('Invalid');
+      } catch(e) {
+        document.getElementById('verify-res').innerHTML = '<div class="log-error">>> VERIFICATION FAILED</div>';
+      }
+      btn.innerText = 'Verify Attestation Signature';
+    }
+
+    // Fetch compose hash on load
+    (async function loadComposeHash() {
+      try {
+        const res = await fetch('/v1/attestation');
+        const data = await res.json();
+        const hashEl = document.getElementById('compose-hash');
+        if (data.compose_hash) {
+          hashEl.innerText = data.compose_hash;
+        } else if (data.error) {
+          hashEl.innerText = 'TEE: ' + (data.tee_type || 'simulation');
+        } else {
+          hashEl.innerText = 'Simulation Mode (No TEE)';
+        }
+      } catch(e) {
+        document.getElementById('compose-hash').innerText = 'Failed to load';
+      }
+    })();
   </script>
 
   <!-- Receipt Modal -->
@@ -606,7 +1217,6 @@ export function renderLandingPage(
 
   <!-- Toast Notification -->
   <div id="toast" class="toast"></div>
-
 </body>
 </html>
   `;

@@ -2,17 +2,17 @@
 
 All notable changes to the Verified Randomness Service.
 
-## [0.0.1] - 2026-01-08
+## [0.1.0-BETA] - 2026-01-21
 
 ### Initial Release
 
 **Security Features:**
 
-- x402 payment protocol support ($0.01 per request)
-- Replay attack prevention via LRU signature cache
+- x402 payment protocol with facilitator-based verification ($0.01 per request)
+- Multichain support (Solana, Base) via PayAI facilitator
+- Replay attack prevention via LRU payment ID cache
 - Rate limiting (100/min global, 20/min paid endpoints)
 - Strict CORS policy for production
-- Multi-RPC fallback (Helius → Alchemy → Public)
 
 **TEE Integration:**
 
@@ -43,7 +43,7 @@ All notable changes to the Verified Randomness Service.
 
 - Whitelist support (free access for allowed origins)
 - API key support (partner access)
-- x402 payment protocol (Solana mainnet)
+- x402 payment protocol (Solana, Base via PayAI facilitator)
 
 **Deployment:**
 

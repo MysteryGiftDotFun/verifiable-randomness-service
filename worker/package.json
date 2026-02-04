@@ -1,6 +1,6 @@
 {
   "name": "verifiable-randomness-service",
-  "version": "0.0.1-BETA",
+  "version": "0.1.0-BETA",
   "description": "Secure Randomness Generator for Phala TEE with x402 Payment Support",
   "main": "dist/index.js",
   "scripts": {
@@ -11,13 +11,15 @@
   "dependencies": {
     "@sentry/node": "^7.99.0",
     "@phala/dstack-sdk": "^0.5.7",
+    "@ardrive/turbo-sdk": "^1.19.0",
     "@solana/web3.js": "^1.98.4",
     "bs58": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
-    "lru-cache": "^10.1.0"
+    "lru-cache": "^10.1.0",
+    "x402": "workspace:*"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

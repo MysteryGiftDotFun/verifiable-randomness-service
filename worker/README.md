@@ -231,7 +231,7 @@ async function getVerifiedRandomness(raffleId: string): Promise<string> {
 1. **MRENCLAVE Verification**: Always verify the returned `mrenclave` matches the expected code hash
 2. **Attestation Verification**: Use Intel's attestation verification service to validate SGX quotes
 3. **Request Hash**: Include unique data in `request_hash` to prevent replay attacks
-4. **Payment Verification**: The server verifies x402 payments on-chain before providing randomness
+4. **Payment Verification**: The server verifies x402 payments via the PayAI facilitator before providing randomness
 
 ## Environment Variables
 
@@ -242,7 +242,8 @@ async function getVerifiedRandomness(raffleId: string): Promise<string> {
 | `WHITELIST`      | Comma-separated allowed origins | No         |
 | `API_KEYS`       | Comma-separated API keys        | No         |
 | `MRENCLAVE`      | Set by TEE environment          | Auto       |
-| `SOLANA_RPC_URL` | For payment verification        | Production |
+| `X402_FACILITATOR_URL` | PayAI facilitator URL     | Yes        |
+| `SUPPORTED_NETWORKS` | Payment networks (solana,base) | No         |
 
 ## Verification (Free)
 
@@ -282,9 +283,11 @@ For high-volume public usage (>20 requests/second), use **Horizontal Scaling** b
 ## Security Architecture
 
 1.  **x402 Payment**:
-    - Client sends transaction signature in `X-Payment` header.
-    - TEE worker verifies transaction on-chain via Solana RPC.
-    - Verification checks: Recipient, Amount, Confirmations, Recency (<1h), Replay (signature cache).
+    - Client creates payment intent via `/v1/payment/create`.
+    - Client completes payment through the PayAI facilitator (Solana or Base).
+    - Client includes `paymentId` in `X-Payment` header.
+    - TEE worker verifies payment status via facilitator API.
+    - Replay protection via LRU payment ID cache (10,000 entries, 1h TTL).
 
 2.  **TEE Attestation**:
     - Every response includes an Intel TDX Quote.

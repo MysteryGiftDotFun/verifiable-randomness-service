@@ -35,15 +35,15 @@ TEE-powered verifiable randomness for the [Mystery Gift](https://mysterygift.fun
 
 ### 🔐 Payment Protection
 
-- **x402 protocol** for on-chain payment verification
-- **Replay attack prevention** via LRU signature cache (10,000 entries, 1-hour TTL)
-- **Transaction validation**: Timestamp, amount, recipient checks
-- **Multi-RPC fallback**: Helius → Alchemy → Public RPC
+- **x402 protocol** with facilitator-based verification (chain-agnostic)
+- **Replay attack prevention** via LRU payment ID cache (10,000 entries, 1-hour TTL)
+- **Multichain support**: Solana and Base via PayAI facilitator
+- **Zero RPC dependencies**: Facilitator handles all on-chain verification
 
 ### 🛡️ Rate Limiting
 
 - **Global rate limit**: 100 requests/minute per IP
-- **Paid endpoint limit**: 20 requests/minute per payment signature
+- **Paid endpoint limit**: 20 requests/minute per payment ID
 - **Prevents**: DOS attacks, API abuse, resource exhaustion
 
 ### 🌐 CORS Policy
@@ -126,8 +126,8 @@ npm run build  # Build for production
 ```bash
 NODE_ENV=production
 PAYMENT_WALLET=<your-solana-address>
-HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=<key>
-GLITCHTIP_DSN=https://<your-dsn>@glitchtip.com/1
+X402_FACILITATOR_URL=https://facilitator.payai.network
+SUPPORTED_NETWORKS=solana
 WHITELIST=mysterygift.fun,localhost
 API_KEYS=secret-key-1,secret-key-2
 ```
@@ -162,21 +162,26 @@ npm run deploy # Deploy to Cloudflare Workers
 
 ### Overview
 
-The service uses **x402** for machine-to-machine payments on Solana.
+The service uses **x402** with facilitator-based verification. Payments are chain-agnostic — the PayAI facilitator handles all on-chain verification.
 
-**Price**: $0.01 USD per request (in SOL or USDC)
+**Price**: $0.01 USD per request
+**Supported networks**: Solana, Base
 
 ### How to Pay
 
-1. **Send payment transaction** on Solana:
+1. **Create a payment intent**:
 
-   ```
-   From: Your wallet
-   To: 3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx
-   Amount: ≥100,000 lamports (0.0001 SOL) or ≥10,000 USDC units
+   ```bash
+   curl -X POST https://rng.mysterygift.fun/v1/payment/create \
+     -H "Content-Type: application/json" \
+     -d '{"network": "solana"}'
    ```
 
-2. **Include payment proof** in request:
+   Returns: `{ paymentId, paymentUrl, amount, currency, network, expiresAt }`
+
+2. **Complete payment** via the facilitator payment URL
+
+3. **Include payment proof** in request:
 
    ```bash
    curl -X POST https://rng.mysterygift.fun/v1/randomness \
@@ -185,32 +190,23 @@ The service uses **x402** for machine-to-machine payments on Solana.
      -d '{"request_hash": "optional-identifier"}'
    ```
 
-3. **Payment proof format**:
+4. **Payment proof format** (base64-encoded):
    ```json
    {
-     "tx_signature": "5J7Ky...",
-     "amount": 1,
-     "payer": "Your wallet address"
+     "paymentId": "pay_abc123..."
    }
    ```
 
-### Payment Requirements
+### Payment Verification
 
-✅ **Valid transaction**:
+The facilitator verifies:
+- Payment completed on-chain (Solana or Base)
+- Correct amount received
+- Payment not expired
 
-- Confirmed on Solana
-- Sent within last hour
-- Amount ≥ $0.01 USD
-- To correct wallet address
-- Not previously used (replay protection)
-
-❌ **Rejected**:
-
-- Transaction not found
-- Failed on-chain
-- Too old (>1 hour) or from future (>5 min)
-- Insufficient amount
-- Already used signature
+The service enforces:
+- Replay protection (each paymentId used once)
+- Rate limiting per payment ID
 
 ---
 
@@ -331,8 +327,10 @@ curl -X POST https://rng.mysterygift.fun/v1/random/dice \
   "payment": {
     "amount": 1,
     "currency": "USD",
-    "payment_methods": ["solana:usdc", "solana:sol"],
-    "payment_address": "3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx"
+    "networks": ["solana", "base"],
+    "facilitator_url": "https://facilitator.payai.network",
+    "create_payment_endpoint": "/v1/payment/create",
+    "x402_version": "1.1"
   }
 }
 ```
@@ -357,26 +355,18 @@ curl -X POST https://rng.mysterygift.fun/v1/random/dice \
 
 ## Monitoring
 
-### GlitchTip (Error Tracking)
-
-Configure via environment variable:
-
-```bash
-GLITCHTIP_DSN=https://<key>@glitchtip.com/1
-```
-
 ### Logs
 
-Monitor signature cache usage:
+Monitor payment ID cache usage:
 
 ```
-[TEE] Signature cache: 1234/10000 entries
+[TEE] Payment ID cache: 1234/10000 entries
 ```
 
-Monitor RPC health:
+Monitor facilitator verification:
 
 ```
-[TEE] Randomness request failed on Helius: 429, trying fallback...
+[TEE] Payment verified: pay_abc123 { tx: "5J7K...", amount: "0.01" }
 ```
 
 ---
@@ -387,13 +377,13 @@ Monitor RPC health:
 
 - [ ] Set `NODE_ENV=production`
 - [ ] Configure `PAYMENT_WALLET` (your Solana address)
-- [ ] Add RPC providers (`HELIUS_RPC_URL`, `ALCHEMY_RPC_URL`)
-- [ ] Set `GLITCHTIP_DSN` for monitoring
+- [ ] Set `X402_FACILITATOR_URL` (PayAI facilitator)
+- [ ] Set `SUPPORTED_NETWORKS` (solana, base)
 - [ ] Update `WHITELIST` for your domains
 - [ ] Generate `API_KEYS` for partners
 - [ ] Deploy worker to Phala Cloud
 - [ ] Deploy landing page to Cloudflare Workers
-- [ ] Test payment flow end-to-end
+- [ ] Test payment flow end-to-end (both chains)
 
 ### Health Check
 
@@ -429,8 +419,8 @@ curl https://rng.mysterygift.fun/v1/health
 
 - **CORS**: Strict origin whitelist (production)
 - **Rate Limits**: Multi-tier protection
-- **Replay Protection**: LRU cache with TTL
-- **Payment Verification**: On-chain transaction validation
+- **Replay Protection**: LRU payment ID cache with TTL
+- **Payment Verification**: Facilitator-based (chain-agnostic)
 
 ### Operational Security
 

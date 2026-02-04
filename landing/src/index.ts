@@ -17,7 +17,8 @@ export interface Env {
 const VERSION = '0.0.1';
 const APP_ID = '0fd4d6d4ad7d850389643319dd0e35ad14f578a5';
 const PAYMENT_WALLET = '3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx';
-const RPC_URL = 'https://api.mainnet-beta.solana.com';
+const FACILITATOR_URL = 'https://facilitator.payai.network';
+const SUPPORTED_NETWORKS = ['solana'];
 
 // API endpoints that should be proxied to the TEE Worker
 const API_ROUTES = [
@@ -113,13 +114,16 @@ export default {
       const composeHash = 'Loading...'; // Will be fetched client-side
       const nodeUrl = `https://${APP_ID}-8090.dstack-pha-prod5.phala.network/`;
       
+      const environment = process.env.APP_ENVIRONMENT || 'development';
       const html = renderLandingPage(
         VERSION,
         APP_ID,
         composeHash,
         nodeUrl,
         PAYMENT_WALLET,
-        RPC_URL
+        FACILITATOR_URL,
+        environment,
+        SUPPORTED_NETWORKS
       );
 
       return new Response(html, {
