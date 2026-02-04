@@ -13,10 +13,10 @@ services:
       - PAYMENT_WALLET=${PAYMENT_WALLET:-3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx}
       - WHITELIST=${WHITELIST:-localhost,mysterygift.fun,api.mysterygift.fun,rng.mysterygift.fun}
       - API_KEYS=${API_KEYS:-}
-      - HELIUS_RPC_URL=${HELIUS_RPC_URL:-}
-      - ALCHEMY_RPC_URL=${ALCHEMY_RPC_URL:-}
-      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
-      - GLITCHTIP_DSN=${GLITCHTIP_DSN:-}
+      - X402_FACILITATOR_URL=${X402_FACILITATOR_URL:-https://facilitator.payai.network}
+      - X402_API_KEY=${X402_API_KEY:-}
+      - SUPPORTED_NETWORKS=${SUPPORTED_NETWORKS:-solana}
+      - ARWEAVE_ENABLED=${ARWEAVE_ENABLED:-true}
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
     restart: always
@@ -41,10 +41,10 @@ services:
       - PAYMENT_WALLET=${PAYMENT_WALLET_DEV:-}
       - WHITELIST=${WHITELIST_DEV:-localhost,dev.mysterygift.fun,api-dev.mysterygift.fun,rng-dev.mysterygift.fun}
       - API_KEYS=${API_KEYS:-}
-      - HELIUS_RPC_URL=${HELIUS_RPC_URL:-}
-      - ALCHEMY_RPC_URL=${ALCHEMY_RPC_URL:-}
-      - SOLANA_RPC_URL=https://api.devnet.solana.com
-      - GLITCHTIP_DSN=${GLITCHTIP_DSN:-}
+      - X402_FACILITATOR_URL=${X402_FACILITATOR_URL:-https://facilitator.payai.network}
+      - X402_API_KEY=${X402_API_KEY:-}
+      - SUPPORTED_NETWORKS=${SUPPORTED_NETWORKS:-solana,base}
+      - ARWEAVE_ENABLED=${ARWEAVE_ENABLED:-true}
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
     restart: always
