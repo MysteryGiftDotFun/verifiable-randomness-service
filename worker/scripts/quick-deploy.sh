@@ -188,6 +188,13 @@ echo ""
 echo "Compiling TypeScript..."
 npm run build
 
+# Copy x402 shared package for Docker build
+echo "Copying x402 shared package..."
+rm -rf .x402-pkg
+mkdir -p .x402-pkg/dist
+cp ../../../../packages/x402/package.json .x402-pkg/
+cp -r ../../../../packages/x402/dist/* .x402-pkg/dist/
+
 # Build Docker image for linux/amd64 (required for Phala TEE)
 echo ""
 echo "Building Docker image: $IMAGE_NAME (linux/amd64)"
@@ -196,6 +203,9 @@ echo "Note: Phala TEE runs on x86_64/amd64 architecture"
 # Use buildx to build and push for amd64 platform
 docker buildx create --name phala-builder --use 2>/dev/null || docker buildx use phala-builder 2>/dev/null || true
 docker buildx build --platform linux/amd64 -t "$IMAGE_NAME" --push .
+
+# Clean up x402 package copy
+rm -rf .x402-pkg
 
 echo ""
 echo "Image built and pushed to Docker Hub!"
@@ -222,9 +232,9 @@ cat >.env.deploy <<EOF
 PAYMENT_WALLET=$PAYMENT_WALLET
 WHITELIST=$WHITELIST
 API_KEYS=$API_KEYS
-HELIUS_RPC_URL=$HELIUS_RPC_URL
-ALCHEMY_RPC_URL=$ALCHEMY_RPC_URL
-SOLANA_RPC_URL=$SOLANA_RPC_URL
+X402_FACILITATOR_URL=${X402_FACILITATOR_URL:-https://facilitator.payai.network}
+X402_API_KEY=${X402_API_KEY:-}
+SUPPORTED_NETWORKS=${SUPPORTED_NETWORKS:-solana}
 EOF
 
 echo "Created .env.deploy with environment variables"

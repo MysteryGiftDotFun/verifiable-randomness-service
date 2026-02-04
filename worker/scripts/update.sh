@@ -71,10 +71,20 @@ echo "Step 1: Compiling TypeScript..."
 npm run build
 echo ""
 
+# Copy x402 shared package for Docker build
+echo "Step 1b: Copying x402 shared package..."
+rm -rf .x402-pkg
+mkdir -p .x402-pkg/dist
+cp ../../../../packages/x402/package.json .x402-pkg/
+cp -r ../../../../packages/x402/dist/* .x402-pkg/dist/
+
 # Build and push Docker image
 echo "Step 2: Building Docker image (linux/amd64)..."
 docker buildx create --name phala-builder --use 2>/dev/null || docker buildx use phala-builder 2>/dev/null || true
 docker buildx build --platform linux/amd64 -t "$IMAGE_NAME" --push .
+
+# Clean up x402 package copy
+rm -rf .x402-pkg
 echo ""
 echo "Image pushed to Docker Hub!"
 echo ""
