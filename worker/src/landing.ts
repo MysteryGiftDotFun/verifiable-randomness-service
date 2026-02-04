@@ -48,6 +48,8 @@ export function renderLandingPage(config: LandingConfig): string {
   <link href="https://fonts.googleapis.com/css2?family=Sometype+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 
   <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+  <script src="https://unpkg.com/@solana/web3.js@1.95.8/lib/index.iife.min.js"></script>
+  <script src="https://unpkg.com/@solana/spl-token@0.4.9/lib/index.iife.min.js"></script>
 
   <style>
     :root {
@@ -718,7 +720,7 @@ export function renderLandingPage(config: LandingConfig): string {
             <div class="hash-display" style="margin-bottom:0.5rem">/v1/random/pick</div>
             <div class="hash-display" style="margin-bottom:0.5rem">/v1/random/dice</div>
             <div class="hash-display" style="margin-bottom:0.5rem">/v1/random/uuid</div>
-            <div class="hash-display">/v1/payment/create</div>
+            <div class="hash-display">/v1/random/shuffle</div>
           </div>
 
           <div class="card">
@@ -888,67 +890,7 @@ export function renderLandingPage(config: LandingConfig): string {
       };
 
       try {
-        // 1. Create payment intent via facilitator
-        log('Creating payment intent (' + selectedNetwork + ')...');
-        const payRes = await fetch('/v1/payment/create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ network: selectedNetwork }),
-        });
-        const payData = await payRes.json();
-        if (payData.error) throw new Error(payData.error);
-
-        const { paymentId, paymentUrl } = payData;
-        receiptData.payment = {
-          method: 'x402 (' + selectedNetwork + ')',
-          amount: '$0.01',
-          paymentId: paymentId,
-        };
-
-        // 2. Open facilitator payment page in popup
-        log('Opening payment window...');
-        const popup = window.open(paymentUrl, 'x402-payment', 'width=500,height=700,left=200,top=100');
-
-        // 3. Poll for payment completion
-        log('Waiting for payment confirmation...');
-        let paid = false;
-        const maxAttempts = 60; // 5 minutes (5s intervals)
-        for (let i = 0; i < maxAttempts; i++) {
-          await new Promise(r => setTimeout(r, 5000));
-
-          // Check if popup was closed without paying
-          if (popup && popup.closed && !paid) {
-            // Give a few more seconds in case payment was just submitted
-            await new Promise(r => setTimeout(r, 3000));
-          }
-
-          try {
-            const checkRes = await fetch('/v1/payment/create?check=' + paymentId);
-            const checkData = await checkRes.json();
-            if (checkData.status === 'completed') {
-              paid = true;
-              receiptData.payment.transactionHash = checkData.transactionHash;
-              break;
-            }
-            if (checkData.status === 'expired' || checkData.status === 'failed') {
-              throw new Error('Payment ' + checkData.status);
-            }
-          } catch(pollErr) {
-            if (pollErr.message.includes('expired') || pollErr.message.includes('failed')) throw pollErr;
-          }
-
-          if (popup && popup.closed && i > 2) {
-            throw new Error('Payment window closed before completion');
-          }
-        }
-
-        if (!paid) throw new Error('Payment timed out');
-        if (popup && !popup.closed) popup.close();
-
-        log('Payment confirmed', 'success');
-
-        // 4. Prepare Request
-        const proof = { paymentId: paymentId, network: selectedNetwork, payer: wallet, timestamp: Date.now() };
+        // 1. Build request body and endpoint
         let body = { request_hash: receiptData.request_id };
         let endpoint = '/v1/randomness';
 
@@ -967,31 +909,136 @@ export function renderLandingPage(config: LandingConfig): string {
           receiptData.params = { items: body.items };
         }
 
-        // 5. Call API with payment proof
-        log('Requesting TEE randomness...');
-        const res = await fetch(endpoint, {
-          method:'POST',
-          headers:{
-            'Content-Type':'application/json',
-            'X-Payment':'x402 '+btoa(JSON.stringify(proof)),
-          },
-          body:JSON.stringify(body)
+        // 2. Make initial request to get PaymentRequirements (402)
+        log('Fetching payment requirements...');
+        const initialRes = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
         });
-        const data = await res.json();
-        if(data.error) throw new Error(data.error);
 
-        // 6. Store result
-        receiptData.result = {
-          random_seed: data.random_seed,
-          tee_type: data.tee_type,
-          attestation: data.attestation
+        if (initialRes.status !== 402) {
+          // If not 402, endpoint may be free or errored
+          const data = await initialRes.json();
+          if (data.error) throw new Error(data.error);
+          receiptData.result = { random_seed: data.random_seed, tee_type: data.tee_type, attestation: data.attestation };
+          if (data.number !== undefined) receiptData.result.value = data.number;
+          if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
+          if (data.picked !== undefined) receiptData.result.value = data.picked;
+          receiptData.payment = { method: 'Free (whitelisted)', amount: '$0.00' };
+          log('Complete! (no payment required)', 'success');
+          showReceipt(receiptData);
+          return;
+        }
+
+        const paymentInfo = await initialRes.json();
+        const accepts = paymentInfo.accepts || [];
+        const requirements = accepts.find(r => r.network === selectedNetwork) || accepts[0];
+        if (!requirements) throw new Error('No payment requirements for ' + selectedNetwork);
+
+        log('Building USDC transfer transaction...');
+        receiptData.payment = {
+          method: 'x402 (' + selectedNetwork + ')',
+          amount: '$0.01',
         };
 
-        if (data.number !== undefined) receiptData.result.value = data.number;
-        if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
-        if (data.picked !== undefined) receiptData.result.value = data.picked;
+        // 3. Build and sign USDC transfer transaction
+        if (selectedNetwork === 'solana') {
+          const { Connection, PublicKey, Transaction, SystemProgram } = solanaWeb3;
 
-        // 7. Auto-verify attestation
+          // Use mainnet RPC for Solana
+          const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+
+          const fromPubkey = new PublicKey(wallet);
+          const toPubkey = new PublicKey(requirements.payTo);
+          const usdcMint = new PublicKey(requirements.asset);
+          const amount = parseInt(requirements.maxAmountRequired);
+
+          // Get associated token accounts
+          const fromAta = await splToken.getAssociatedTokenAddress(usdcMint, fromPubkey);
+          const toAta = await splToken.getAssociatedTokenAddress(usdcMint, toPubkey);
+
+          log('Preparing SPL token transfer...');
+
+          // Check if destination ATA exists
+          let instructions = [];
+          try {
+            await splToken.getAccount(connection, toAta);
+          } catch (e) {
+            // Create ATA if it doesn't exist
+            instructions.push(
+              splToken.createAssociatedTokenAccountInstruction(fromPubkey, toAta, toPubkey, usdcMint)
+            );
+          }
+
+          // Add SPL transfer instruction
+          instructions.push(
+            splToken.createTransferInstruction(fromAta, toAta, fromPubkey, amount)
+          );
+
+          const transaction = new Transaction().add(...instructions);
+          transaction.feePayer = fromPubkey;
+
+          // Use fee payer from extra if provided
+          if (requirements.extra && requirements.extra.feePayer) {
+            transaction.feePayer = new PublicKey(requirements.extra.feePayer);
+          }
+
+          const { blockhash } = await connection.getLatestBlockhash('confirmed');
+          transaction.recentBlockhash = blockhash;
+
+          log('Please approve the transaction in your wallet...');
+          const signedTx = await window.solana.signTransaction(transaction);
+          const serializedTx = signedTx.serialize().toString('base64');
+
+          // 4. Build X-PAYMENT header
+          const paymentPayload = {
+            x402Version: 1,
+            scheme: requirements.scheme || 'exact',
+            network: 'solana',
+            payload: { transaction: serializedTx },
+          };
+
+          const xPaymentHeader = btoa(JSON.stringify(paymentPayload));
+          log('Transaction signed, sending payment...');
+
+          // 5. Re-send request with X-PAYMENT header
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Payment': xPaymentHeader,
+            },
+            body: JSON.stringify(body),
+          });
+
+          // Get settlement info from response header
+          const paymentResponse = res.headers.get('X-PAYMENT-RESPONSE');
+          if (paymentResponse) {
+            try {
+              const settlement = JSON.parse(atob(paymentResponse));
+              receiptData.payment.settlement = settlement;
+            } catch(e) {}
+          }
+
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+
+          receiptData.result = {
+            random_seed: data.random_seed,
+            tee_type: data.tee_type,
+            attestation: data.attestation,
+          };
+
+          if (data.number !== undefined) receiptData.result.value = data.number;
+          if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
+          if (data.picked !== undefined) receiptData.result.value = data.picked;
+
+        } else {
+          throw new Error('EVM payment not yet supported in the landing page. Use API with X-PAYMENT header directly.');
+        }
+
+        // 6. Auto-verify attestation
         log('Verifying attestation...');
         try {
           const attRes = await fetch('/v1/attestation');
@@ -999,20 +1046,20 @@ export function renderLandingPage(config: LandingConfig): string {
           receiptData.attestation = {
             app_id: attData.app_id,
             compose_hash: attData.compose_hash || 'Simulation Mode',
-            tee_type: attData.tee_type
+            tee_type: attData.tee_type,
           };
 
           if (attData.quote_hex) {
             const verifyRes = await fetch('/v1/verify', {
-              method:'POST',
-              headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({quote_hex: attData.quote_hex})
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ quote_hex: attData.quote_hex }),
             });
             const verifyData = await verifyRes.json();
             receiptData.verification = {
               valid: verifyData.valid,
               verified_by: 'Phala Cloud Attestation API',
-              verified_at: new Date().toISOString()
+              verified_at: new Date().toISOString(),
             };
           } else {
             receiptData.verification = { valid: false, note: 'Simulation mode - no hardware attestation' };
@@ -1039,10 +1086,11 @@ export function renderLandingPage(config: LandingConfig): string {
         resultDisplay = String(data.result.value);
       }
 
-      const txLink = data.payment.transactionHash
+      const settleTx = data.payment.settlement?.transaction;
+      const txLink = settleTx
         ? (data.network === 'base'
-          ? 'https://basescan.org/tx/' + data.payment.transactionHash
-          : 'https://solscan.io/tx/' + data.payment.transactionHash)
+          ? 'https://basescan.org/tx/' + settleTx
+          : 'https://solscan.io/tx/' + settleTx)
         : null;
 
       content.innerHTML = \`
@@ -1085,12 +1133,12 @@ export function renderLandingPage(config: LandingConfig): string {
           \${txLink ? \`<div class="receipt-row">
             <span class="receipt-label">TX</span>
             <a class="receipt-link" href="\${txLink}" target="_blank">
-              \${data.payment.transactionHash.slice(0,8)}...\${data.payment.transactionHash.slice(-6)}
+              \${settleTx.slice(0,8)}...\${settleTx.slice(-6)}
               <iconify-icon icon="ph:arrow-square-out"></iconify-icon>
             </a>
           </div>\` : \`<div class="receipt-row">
-            <span class="receipt-label">Payment ID</span>
-            <span class="receipt-value">\${data.payment.paymentId.slice(0,16)}...</span>
+            <span class="receipt-label">Protocol</span>
+            <span class="receipt-value">x402 v1</span>
           </div>\`}
         </div>
 

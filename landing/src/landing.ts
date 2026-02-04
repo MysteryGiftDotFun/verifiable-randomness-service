@@ -25,6 +25,8 @@ export function renderLandingPage(
   <link href="https://fonts.googleapis.com/css2?family=Sometype+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 
   <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+  <script src="https://unpkg.com/@solana/web3.js@1.95.8/lib/index.iife.min.js"></script>
+  <script src="https://unpkg.com/@solana/spl-token@0.4.9/lib/index.iife.min.js"></script>
 
   <style>
     :root {
@@ -348,7 +350,7 @@ export function renderLandingPage(
             <div class="hash-display" style="margin-bottom:0.5rem">/v1/random/pick</div>
             <div class="hash-display" style="margin-bottom:0.5rem">/v1/random/dice</div>
             <div class="hash-display" style="margin-bottom:0.5rem">/v1/random/uuid</div>
-            <div class="hash-display">/v1/payment/create</div>
+            <div class="hash-display">/v1/random/shuffle</div>
           </div>
 
           <div class="card">
@@ -508,53 +510,78 @@ export function renderLandingPage(
       log('Initializing ' + type.toUpperCase() + '...');
       let receiptData = { request_id: 'req-' + Date.now(), timestamp: new Date().toISOString(), type: type.toUpperCase(), wallet: wallet, network: selectedNetwork };
       try {
-        // 1. Create payment intent via facilitator
-        log('Creating payment intent (' + selectedNetwork + ')...');
-        const payRes = await fetch('/v1/payment/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ network: selectedNetwork }) });
-        const payData = await payRes.json();
-        if (payData.error) throw new Error(payData.error);
-        const { paymentId, paymentUrl } = payData;
-        receiptData.payment = { method: 'x402 (' + selectedNetwork + ')', amount: '$0.01', paymentId: paymentId };
-
-        // 2. Open facilitator payment page in popup
-        log('Opening payment window...');
-        const popup = window.open(paymentUrl, 'x402-payment', 'width=500,height=700,left=200,top=100');
-
-        // 3. Poll for payment completion
-        log('Waiting for payment confirmation...');
-        let paid = false;
-        for (let i = 0; i < 60; i++) {
-          await new Promise(r => setTimeout(r, 5000));
-          if (popup && popup.closed && !paid) await new Promise(r => setTimeout(r, 3000));
-          try {
-            const checkRes = await fetch('/v1/payment/create?check=' + paymentId);
-            const checkData = await checkRes.json();
-            if (checkData.status === 'completed') { paid = true; receiptData.payment.transactionHash = checkData.transactionHash; break; }
-            if (checkData.status === 'expired' || checkData.status === 'failed') throw new Error('Payment ' + checkData.status);
-          } catch(pollErr) { if (pollErr.message.includes('expired') || pollErr.message.includes('failed')) throw pollErr; }
-          if (popup && popup.closed && i > 2) throw new Error('Payment window closed before completion');
-        }
-        if (!paid) throw new Error('Payment timed out');
-        if (popup && !popup.closed) popup.close();
-        log('Payment confirmed', 'success');
-
-        // 4. Prepare request
-        const proof = { paymentId: paymentId, network: selectedNetwork, payer: wallet, timestamp: Date.now() };
+        // 1. Build request body and endpoint
         let body = { request_hash: receiptData.request_id };
         let endpoint = '/v1/randomness';
         if (type === 'number') { endpoint = '/v1/random/number'; body.min = parseInt(document.getElementById('in-min').value) || 1; body.max = parseInt(document.getElementById('in-max').value) || 100; receiptData.params = { min: body.min, max: body.max }; }
         else if (type === 'dice') { endpoint = '/v1/random/dice'; body.dice = document.getElementById('in-dice').value || '2d6'; receiptData.params = { dice: body.dice }; }
         else if (type === 'pick') { endpoint = '/v1/random/pick'; body.items = (document.getElementById('in-items').value || 'A,B,C').split(',').map(s=>s.trim()); receiptData.params = { items: body.items }; }
 
-        // 5. Call API
-        log('Requesting TEE randomness...');
-        const res = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json', 'X-Payment':'x402 '+btoa(JSON.stringify(proof))}, body:JSON.stringify(body) });
-        const data = await res.json();
-        if(data.error) throw new Error(data.error);
-        receiptData.result = { random_seed: data.random_seed, tee_type: data.tee_type, attestation: data.attestation };
-        if (data.number !== undefined) receiptData.result.value = data.number;
-        if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
-        if (data.picked !== undefined) receiptData.result.value = data.picked;
+        // 2. Make initial request to get 402 with PaymentRequirements
+        log('Fetching payment requirements...');
+        const initialRes = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (initialRes.status !== 402) {
+          const data = await initialRes.json();
+          if (data.error) throw new Error(data.error);
+          receiptData.result = { random_seed: data.random_seed, tee_type: data.tee_type, attestation: data.attestation };
+          if (data.number !== undefined) receiptData.result.value = data.number;
+          if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
+          if (data.picked !== undefined) receiptData.result.value = data.picked;
+          receiptData.payment = { method: 'Free (whitelisted)', amount: '$0.00' };
+          log('Complete! (no payment required)', 'success');
+          showReceipt(receiptData);
+          return;
+        }
+        const paymentInfo = await initialRes.json();
+        const accepts = paymentInfo.accepts || [];
+        const requirements = accepts.find(r => r.network === selectedNetwork) || accepts[0];
+        if (!requirements) throw new Error('No payment requirements for ' + selectedNetwork);
+        log('Building USDC transfer transaction...');
+        receiptData.payment = { method: 'x402 (' + selectedNetwork + ')', amount: '$0.01' };
+
+        // 3. Build and sign USDC transfer (Solana)
+        if (selectedNetwork === 'solana') {
+          const { Connection, PublicKey, Transaction } = solanaWeb3;
+          const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+          const fromPubkey = new PublicKey(wallet);
+          const toPubkey = new PublicKey(requirements.payTo);
+          const usdcMint = new PublicKey(requirements.asset);
+          const amount = parseInt(requirements.maxAmountRequired);
+          const fromAta = await splToken.getAssociatedTokenAddress(usdcMint, fromPubkey);
+          const toAta = await splToken.getAssociatedTokenAddress(usdcMint, toPubkey);
+          log('Preparing SPL token transfer...');
+          let instructions = [];
+          try { await splToken.getAccount(connection, toAta); } catch (e) {
+            instructions.push(splToken.createAssociatedTokenAccountInstruction(fromPubkey, toAta, toPubkey, usdcMint));
+          }
+          instructions.push(splToken.createTransferInstruction(fromAta, toAta, fromPubkey, amount));
+          const transaction = new Transaction().add(...instructions);
+          transaction.feePayer = fromPubkey;
+          if (requirements.extra && requirements.extra.feePayer) transaction.feePayer = new PublicKey(requirements.extra.feePayer);
+          const { blockhash } = await connection.getLatestBlockhash('confirmed');
+          transaction.recentBlockhash = blockhash;
+          log('Please approve the transaction in your wallet...');
+          const signedTx = await window.solana.signTransaction(transaction);
+          const serializedTx = signedTx.serialize().toString('base64');
+          const paymentPayload = { x402Version: 1, scheme: requirements.scheme || 'exact', network: 'solana', payload: { transaction: serializedTx } };
+          const xPaymentHeader = btoa(JSON.stringify(paymentPayload));
+          log('Transaction signed, sending payment...');
+
+          // 4. Re-send with X-PAYMENT header
+          const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Payment': xPaymentHeader }, body: JSON.stringify(body) });
+          const paymentResponse = res.headers.get('X-PAYMENT-RESPONSE');
+          if (paymentResponse) { try { receiptData.payment.settlement = JSON.parse(atob(paymentResponse)); } catch(e) {} }
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          receiptData.result = { random_seed: data.random_seed, tee_type: data.tee_type, attestation: data.attestation };
+          if (data.number !== undefined) receiptData.result.value = data.number;
+          if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
+          if (data.picked !== undefined) receiptData.result.value = data.picked;
+        } else {
+          throw new Error('EVM payment not yet supported in the landing page. Use API with X-PAYMENT header directly.');
+        }
+
+        // 5. Auto-verify attestation
         log('Verifying attestation...');
         try {
           const attRes = await fetch('/v1/attestation');
@@ -576,12 +603,13 @@ export function renderLandingPage(
       const content = document.getElementById('receipt-content');
       let resultDisplay = data.result.random_seed || 'N/A';
       if (data.result.value !== undefined) resultDisplay = String(data.result.value);
-      const txLink = data.payment.transactionHash ? (data.network === 'base' ? 'https://basescan.org/tx/' + data.payment.transactionHash : 'https://solscan.io/tx/' + data.payment.transactionHash) : null;
+      const settleTx = data.payment.settlement?.transaction;
+      const txLink = settleTx ? (data.network === 'base' ? 'https://basescan.org/tx/' + settleTx : 'https://solscan.io/tx/' + settleTx) : null;
       content.innerHTML = \`
         <div class="receipt-header"><h3><iconify-icon icon="ph:check-circle-fill"></iconify-icon> TEE Randomness Receipt</h3><button class="receipt-close" onclick="closeReceipt()">&times;</button></div>
         <div class="receipt-section"><div class="receipt-section-title">Request</div><div class="receipt-row"><span class="receipt-label">ID</span><span class="receipt-value">\\\${data.request_id}</span></div><div class="receipt-row"><span class="receipt-label">Time</span><span class="receipt-value">\\\${new Date(data.timestamp).toLocaleString()}</span></div><div class="receipt-row"><span class="receipt-label">Type</span><span class="receipt-value highlight">\\\${data.type}</span></div></div>
         <div class="receipt-section" style="text-align: center; padding: 1.5rem 2rem;"><div class="receipt-section-title">Result</div><div class="receipt-result">\\\${resultDisplay}</div></div>
-        <div class="receipt-section"><div class="receipt-section-title">Payment</div><div class="receipt-row"><span class="receipt-label">Method</span><span class="receipt-value">\\\${data.payment.method}</span></div><div class="receipt-row"><span class="receipt-label">Amount</span><span class="receipt-value">\\\${data.payment.amount}</span></div>\\\${txLink ? '<div class="receipt-row"><span class="receipt-label">TX</span><a class="receipt-link" href="' + txLink + '" target="_blank">' + data.payment.transactionHash.slice(0,8) + '...' + data.payment.transactionHash.slice(-6) + '<iconify-icon icon="ph:arrow-square-out"></iconify-icon></a></div>' : '<div class="receipt-row"><span class="receipt-label">Payment ID</span><span class="receipt-value">' + data.payment.paymentId.slice(0,16) + '...</span></div>'}</div>
+        <div class="receipt-section"><div class="receipt-section-title">Payment</div><div class="receipt-row"><span class="receipt-label">Method</span><span class="receipt-value">\\\${data.payment.method}</span></div><div class="receipt-row"><span class="receipt-label">Amount</span><span class="receipt-value">\\\${data.payment.amount}</span></div>\\\${txLink ? '<div class="receipt-row"><span class="receipt-label">TX</span><a class="receipt-link" href="' + txLink + '" target="_blank">' + settleTx.slice(0,8) + '...' + settleTx.slice(-6) + '<iconify-icon icon="ph:arrow-square-out"></iconify-icon></a></div>' : '<div class="receipt-row"><span class="receipt-label">Protocol</span><span class="receipt-value">x402 v1</span></div>'}</div>
         <div class="receipt-section"><div class="receipt-section-title">Attestation</div><div class="receipt-row"><span class="receipt-label">TEE Type</span><span class="receipt-value">\\\${data.attestation?.tee_type || 'simulation'}</span></div><div class="receipt-row"><span class="receipt-label">App ID</span><span class="receipt-value">\\\${(data.attestation?.app_id || 'N/A').slice(0, 16)}...</span></div><div class="receipt-row"><span class="receipt-label">Compose Hash</span><span class="receipt-value">\\\${(data.attestation?.compose_hash || 'N/A').slice(0, 12)}...</span></div><div class="receipt-row" style="margin-top: 0.75rem;"><span class="receipt-label">Status</span>\\\${data.verification?.valid ? '<span class="verification-badge"><iconify-icon icon="ph:seal-check-fill"></iconify-icon> Hardware Verified</span>' : '<span class="receipt-value" style="color: var(--text-muted);">Simulation Mode</span>'}</div></div>
         <div class="receipt-actions"><button class="receipt-btn receipt-btn-secondary" onclick="copyReceipt()"><iconify-icon icon="ph:copy"></iconify-icon> Copy</button><button class="receipt-btn receipt-btn-secondary" onclick="downloadReceipt()"><iconify-icon icon="ph:download-simple"></iconify-icon> Download</button><button class="receipt-btn receipt-btn-primary" onclick="closeReceipt()">Done</button></div>
       \`;

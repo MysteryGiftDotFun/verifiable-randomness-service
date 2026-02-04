@@ -13,7 +13,8 @@ import {
 } from './commitment';
 import { LRUCache } from 'lru-cache';
 import rateLimit from 'express-rate-limit';
-import { X402Client } from 'x402';
+import { X402Server } from 'x402';
+import type { PaymentRequirements, PaymentPayload } from 'x402';
 import { renderLandingPage } from './landing';
 
 const app = express();
@@ -47,16 +48,37 @@ const VERSION = packageJson.version;
 // x402 Facilitator Configuration
 const X402_FACILITATOR_URL =
   process.env.X402_FACILITATOR_URL || 'https://facilitator.payai.network';
-const X402_API_KEY = process.env.X402_API_KEY;
 const SUPPORTED_NETWORKS = (process.env.SUPPORTED_NETWORKS || 'solana')
   .split(',')
   .map((n) => n.trim())
   .filter(Boolean);
 
-const x402Client = new X402Client({
+// USDC mint addresses per network
+const USDC_ASSETS: Record<string, string> = {
+  solana: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  base: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+};
+
+// USDC has 6 decimals; $0.01 = 10000 base units
+const PRICE_BASE_UNITS = '10000';
+
+const x402Server = new X402Server({
   facilitatorUrl: X402_FACILITATOR_URL,
-  apiKey: X402_API_KEY,
 });
+
+// Build PaymentRequirements for each supported network
+const paymentRequirementsByNetwork: Record<string, PaymentRequirements> = {};
+for (const network of SUPPORTED_NETWORKS) {
+  paymentRequirementsByNetwork[network] = X402Server.buildPaymentRequirements({
+    network,
+    maxAmountRequired: PRICE_BASE_UNITS,
+    asset: USDC_ASSETS[network] || USDC_ASSETS.solana,
+    payTo: PAYMENT_WALLET,
+    resource: `https://rng.mysterygift.fun/v1/randomness`,
+    description: 'TEE Randomness Request',
+    maxTimeoutSeconds: 60,
+  });
+}
 
 // TEE deployment info
 let TEE_INFO: {
@@ -151,16 +173,16 @@ async function runCommitments(
   }
 }
 
-// Used payment IDs LRU cache (prevent replay attacks + DOS)
-const usedPaymentIds = new LRUCache<string, boolean>({
-  max: 10000, // Max 10k entries to prevent memory exhaustion
-  ttl: 3600000, // 1 hour TTL (auto-cleanup)
+// Replay protection: cache SHA-256 hash of X-PAYMENT payloads
+const usedPayloadHashes = new LRUCache<string, boolean>({
+  max: 10000,
+  ttl: 3600000, // 1 hour TTL
   ttlAutopurge: true,
 });
 
 // Log cache stats periodically
 setInterval(() => {
-  console.log(`[TEE] Payment ID cache: ${usedPaymentIds.size}/${usedPaymentIds.max} entries`);
+  console.log(`[TEE] Payment hash cache: ${usedPayloadHashes.size}/${usedPayloadHashes.max} entries`);
 }, 3600000);
 
 // Log payment configuration on startup
@@ -212,16 +234,10 @@ const paidLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 20, // 20 paid requests per minute
   keyGenerator: (req) => {
-    // Rate limit by payment ID OR IP
-    const paymentHeader = req.get('X-Payment') || req.get('Payment');
+    // Rate limit by payment payload hash OR IP
+    const paymentHeader = req.get('X-Payment');
     if (paymentHeader) {
-      try {
-        const parts = paymentHeader.split(' ');
-        if (parts[1]) {
-          const proof = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-          return proof.paymentId || req.ip;
-        }
-      } catch (e) {}
+      return crypto.createHash('sha256').update(paymentHeader).digest('hex').slice(0, 16);
     }
     return req.ip || 'unknown';
   },
@@ -232,7 +248,11 @@ const paidLimiter = rateLimit({
 app.use('/v1/', globalLimiter);
 
 /**
- * Middleware: Check authentication and payment
+ * Middleware: Check authentication and x402 payment
+ *
+ * x402 protocol flow:
+ * 1. No X-PAYMENT header → 402 with PaymentRequirements in `accepts`
+ * 2. X-PAYMENT header present → decode, verify via facilitator, run handler, settle
  */
 async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const origin = req.get('origin') || req.get('referer') || '';
@@ -256,166 +276,113 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
     return next();
   }
 
-  // 3. Check x402 payment header
-  const paymentHeader = req.get('X-Payment') || req.get('Payment');
+  // 3. Check x402 X-PAYMENT header
+  const paymentHeader = req.get('X-Payment');
 
   if (!paymentHeader) {
-    const networkMethods: string[] = [];
-    for (const net of SUPPORTED_NETWORKS) {
-      if (net === 'solana') networkMethods.push('solana:usdc', 'solana:sol');
-      else if (net === 'base') networkMethods.push('base:usdc', 'base:eth');
-    }
-
+    // Return standard 402 with PaymentRequirements
+    const accepts = Object.values(paymentRequirementsByNetwork);
     res.status(402).json({
-      error: 'Payment Required',
-      message: 'This endpoint requires payment via x402 protocol',
-      payment: {
-        amount: PRICE_PER_REQUEST_CENTS,
-        currency: 'USD',
-        currency_decimals: 2,
-        payment_methods: networkMethods,
-        networks: SUPPORTED_NETWORKS,
-        payment_address: PAYMENT_WALLET,
-        facilitator_url: X402_FACILITATOR_URL,
-        create_payment_endpoint: '/v1/payment/create',
-        x402_version: '1.1',
-        description: 'TEE Attestation Request - Verifiable Randomness',
-      },
-      usage: {
-        endpoint: '/v1/randomness',
-        rate: '$0.01 per request',
-      },
+      x402Version: 1,
+      error: 'X-PAYMENT header is required',
+      accepts,
     });
     return;
   }
 
-  // 4. Verify x402 payment via facilitator
+  // 4. Decode and verify x402 payment
   try {
-    const paymentValid = await verifyFacilitatorPayment(paymentHeader);
+    const paymentPayload = X402Server.decodePaymentHeader(paymentHeader);
 
-    if (!paymentValid) {
+    if (!paymentPayload) {
       res.status(402).json({
-        error: 'Payment Invalid',
-        message: 'The provided payment proof could not be verified',
+        x402Version: 1,
+        error: 'Invalid X-PAYMENT header format',
+        accepts: Object.values(paymentRequirementsByNetwork),
       });
       return;
     }
 
+    // Replay protection: hash the payload
+    const payloadHash = crypto.createHash('sha256').update(paymentHeader).digest('hex');
+    if (usedPayloadHashes.has(payloadHash)) {
+      console.warn(`[TEE] Replay attempt detected: ${payloadHash.slice(0, 16)}`);
+      res.status(402).json({
+        x402Version: 1,
+        error: 'Payment payload already used (replay detected)',
+      });
+      return;
+    }
+    usedPayloadHashes.set(payloadHash, true);
+
+    // Find matching payment requirements for the network
+    const requirements = paymentRequirementsByNetwork[paymentPayload.network];
+    if (!requirements) {
+      usedPayloadHashes.delete(payloadHash);
+      res.status(402).json({
+        x402Version: 1,
+        error: `Unsupported network: ${paymentPayload.network}`,
+        accepts: Object.values(paymentRequirementsByNetwork),
+      });
+      return;
+    }
+
+    // Verify payment with facilitator
+    const verification = await x402Server.verify(paymentPayload, requirements);
+
+    if (!verification.isValid) {
+      usedPayloadHashes.delete(payloadHash);
+      console.warn(`[TEE] Payment invalid: ${verification.invalidReason}`);
+      res.status(402).json({
+        x402Version: 1,
+        error: 'Payment verification failed',
+        reason: verification.invalidReason,
+      });
+      return;
+    }
+
+    console.log(`[TEE] Payment verified from ${verification.payer} on ${paymentPayload.network}`);
+
+    // Store payment context for post-handler settlement
+    (req as any).paymentStatus = 'paid';
+    (req as any).x402PaymentPayload = paymentPayload;
+    (req as any).x402PaymentRequirements = requirements;
+    (req as any).x402Payer = verification.payer;
+
     usageStats.paidRequests++;
     usageStats.totalRevenueCents += PRICE_PER_REQUEST_CENTS;
-    (req as any).paymentStatus = 'paid';
+
+    // Intercept res.json to settle payment after handler completes
+    const originalJson = res.json.bind(res);
+    res.json = function (body: any) {
+      // Settle payment in background (don't block the response)
+      x402Server.settle(paymentPayload, requirements).then((settlement) => {
+        if (settlement.success) {
+          console.log(`[TEE] Payment settled: tx=${settlement.transaction}`);
+        } else {
+          console.error(`[TEE] Settlement failed: ${settlement.errorReason}`);
+        }
+      }).catch((err) => {
+        console.error(`[TEE] Settlement error:`, err);
+      });
+
+      // Add X-PAYMENT-RESPONSE header with settlement info
+      res.set('X-PAYMENT-RESPONSE', Buffer.from(JSON.stringify({
+        x402Version: 1,
+        scheme: paymentPayload.scheme,
+        network: paymentPayload.network,
+        payer: verification.payer,
+      })).toString('base64'));
+
+      return originalJson(body);
+    } as any;
+
     next();
   } catch (error) {
     console.error('[TEE] Payment verification error:', error);
     res.status(500).json({ error: 'Payment verification failed' });
   }
 }
-
-/**
- * Verify x402 payment via facilitator
- * The facilitator handles all on-chain verification (Solana, Base, etc.)
- */
-async function verifyFacilitatorPayment(paymentHeader: string): Promise<boolean> {
-  try {
-    const parts = paymentHeader.split(' ');
-    if (parts[0] !== 'x402' || !parts[1]) {
-      return false;
-    }
-
-    const proofData = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-
-    if (!proofData.paymentId) {
-      return false;
-    }
-
-    // 1. Check replay attack
-    if (usedPaymentIds.has(proofData.paymentId)) {
-      console.warn(`[TEE] Replay attempt detected: ${proofData.paymentId}`);
-      return false;
-    }
-    // Mark as used immediately
-    usedPaymentIds.set(proofData.paymentId, true);
-
-    // 2. Verify payment status with facilitator
-    const verification = await x402Client.verifyPayment(proofData.paymentId);
-
-    if (verification.status !== 'completed') {
-      console.warn(`[TEE] Payment not completed: ${proofData.paymentId} (${verification.status})`);
-      usedPaymentIds.delete(proofData.paymentId);
-      return false;
-    }
-
-    console.log(`[TEE] Payment verified: ${proofData.paymentId}`, {
-      tx: verification.transactionHash,
-      amount: verification.amount,
-    });
-
-    return true;
-  } catch (error) {
-    console.error('[TEE] Payment verification error:', error);
-    return false;
-  }
-}
-
-/**
- * POST /v1/payment/create
- * Creates a payment intent via the x402 facilitator.
- * Also supports GET with ?check={paymentId} for polling payment status.
- */
-app.post('/v1/payment/create', async (req: Request, res: Response) => {
-  try {
-    const { network = 'solana' } = req.body;
-
-    if (!SUPPORTED_NETWORKS.includes(network)) {
-      res.status(400).json({
-        error: `Unsupported network: ${network}. Supported: ${SUPPORTED_NETWORKS.join(', ')}`,
-      });
-      return;
-    }
-
-    const payment = await x402Client.createPayment({
-      amount: (PRICE_PER_REQUEST_CENTS / 100).toFixed(2),
-      currency: 'USD',
-      recipient: PAYMENT_WALLET,
-      network,
-      memo: 'TEE Randomness Request',
-      metadata: { service: 'verifiable-randomness' },
-    });
-
-    res.json({
-      paymentId: payment.paymentId,
-      paymentUrl: payment.paymentUrl,
-      amount: payment.amount,
-      currency: payment.currency,
-      network: payment.network,
-      expiresAt: payment.expiresAt,
-    });
-  } catch (error) {
-    console.error('[TEE] Payment creation error:', error);
-    res.status(500).json({ error: 'Failed to create payment' });
-  }
-});
-
-app.get('/v1/payment/create', async (req: Request, res: Response) => {
-  const paymentId = req.query.check as string;
-  if (!paymentId) {
-    res.status(400).json({ error: 'Missing ?check=paymentId parameter' });
-    return;
-  }
-
-  try {
-    const verification = await x402Client.verifyPayment(paymentId);
-    res.json({
-      paymentId: verification.paymentId,
-      status: verification.status,
-      transactionHash: verification.transactionHash,
-      paidAt: verification.paidAt,
-    });
-  } catch (error) {
-    console.error('[TEE] Payment status check error:', error);
-    res.status(500).json({ error: 'Failed to check payment status' });
-  }
-});
 
 /**
  * POST /v1/randomness
