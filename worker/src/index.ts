@@ -260,9 +260,30 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const apiKey = req.get('X-API-Key') || req.query.api_key;
 
   // 1. Check whitelist (free access for Mystery Gift apps)
-  const isWhitelisted = WHITELIST.some(
-    (entry) => origin.includes(entry) || clientIp.includes(entry)
-  );
+  // Extract hostname from origin (e.g., "https://api.mysterygift.fun" -> "api.mysterygift.fun")
+  let originHost = '';
+  try {
+    if (origin) {
+      originHost = new URL(origin).hostname;
+    }
+  } catch {
+    // Invalid URL, use origin as-is for IP matching
+    originHost = origin;
+  }
+
+  const isWhitelisted = WHITELIST.some((entry) => {
+    // IP address matching
+    if (clientIp && clientIp.includes(entry)) {
+      return true;
+    }
+    // Wildcard subdomain matching: *.domain.com matches any.domain.com
+    if (entry.startsWith('*.')) {
+      const baseDomain = entry.slice(2); // Remove "*."
+      return originHost === baseDomain || originHost.endsWith('.' + baseDomain);
+    }
+    // Exact hostname match only
+    return originHost === entry;
+  });
 
   if (isWhitelisted) {
     usageStats.whitelistedRequests++;
