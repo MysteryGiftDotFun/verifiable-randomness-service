@@ -520,6 +520,7 @@ export function renderLandingPage(
         // 2. Make initial request to get 402 with PaymentRequirements
         log('Fetching payment requirements...');
         const initialRes = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        let isWhitelisted = false;
         if (initialRes.status !== 402) {
           const data = await initialRes.json();
           if (data.error) throw new Error(data.error);
@@ -528,60 +529,62 @@ export function renderLandingPage(
           if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
           if (data.picked !== undefined) receiptData.result.value = data.picked;
           receiptData.payment = { method: 'Free (whitelisted)', amount: '$0.00' };
-          log('Complete! (no payment required)', 'success');
-          showReceipt(receiptData);
-          return;
+          isWhitelisted = true;
         }
-        const paymentInfo = await initialRes.json();
-        const accepts = paymentInfo.accepts || [];
-        const requirements = accepts.find(r => r.network === selectedNetwork) || accepts[0];
-        if (!requirements) throw new Error('No payment requirements for ' + selectedNetwork);
-        log('Building USDC transfer transaction...');
-        receiptData.payment = { method: 'x402 (' + selectedNetwork + ')', amount: '$0.01' };
 
-        // 3. Build and sign USDC transfer (Solana)
-        if (selectedNetwork === 'solana') {
-          const { Connection, PublicKey, Transaction } = solanaWeb3;
-          const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-          const fromPubkey = new PublicKey(wallet);
-          const toPubkey = new PublicKey(requirements.payTo);
-          const usdcMint = new PublicKey(requirements.asset);
-          const amount = parseInt(requirements.maxAmountRequired);
-          const fromAta = await splToken.getAssociatedTokenAddress(usdcMint, fromPubkey);
-          const toAta = await splToken.getAssociatedTokenAddress(usdcMint, toPubkey);
-          log('Preparing SPL token transfer...');
-          let instructions = [];
-          try { await splToken.getAccount(connection, toAta); } catch (e) {
-            instructions.push(splToken.createAssociatedTokenAccountInstruction(fromPubkey, toAta, toPubkey, usdcMint));
+        // 3. Handle payment if not whitelisted
+        if (!isWhitelisted) {
+          const paymentInfo = await initialRes.json();
+          const accepts = paymentInfo.accepts || [];
+          const requirements = accepts.find(r => r.network === selectedNetwork) || accepts[0];
+          if (!requirements) throw new Error('No payment requirements for ' + selectedNetwork);
+          log('Building USDC transfer transaction...');
+          receiptData.payment = { method: 'x402 (' + selectedNetwork + ')', amount: '$0.01' };
+
+          // Build and sign USDC transfer (Solana)
+          if (selectedNetwork === 'solana') {
+            const { Connection, PublicKey, Transaction } = solanaWeb3;
+            const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+            const fromPubkey = new PublicKey(wallet);
+            const toPubkey = new PublicKey(requirements.payTo);
+            const usdcMint = new PublicKey(requirements.asset);
+            const amount = parseInt(requirements.maxAmountRequired);
+            const fromAta = await splToken.getAssociatedTokenAddress(usdcMint, fromPubkey);
+            const toAta = await splToken.getAssociatedTokenAddress(usdcMint, toPubkey);
+            log('Preparing SPL token transfer...');
+            let instructions = [];
+            try { await splToken.getAccount(connection, toAta); } catch (e) {
+              instructions.push(splToken.createAssociatedTokenAccountInstruction(fromPubkey, toAta, toPubkey, usdcMint));
+            }
+            instructions.push(splToken.createTransferInstruction(fromAta, toAta, fromPubkey, amount));
+            const transaction = new Transaction().add(...instructions);
+            transaction.feePayer = fromPubkey;
+            if (requirements.extra && requirements.extra.feePayer) transaction.feePayer = new PublicKey(requirements.extra.feePayer);
+            const { blockhash } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            log('Please approve the transaction in your wallet...');
+            const signedTx = await window.solana.signTransaction(transaction);
+            const serializedTx = signedTx.serialize().toString('base64');
+            const paymentPayload = { x402Version: 1, scheme: requirements.scheme || 'exact', network: 'solana', payload: { transaction: serializedTx } };
+            const xPaymentHeader = btoa(JSON.stringify(paymentPayload));
+            log('Transaction signed, sending payment...');
+
+            // Re-send with X-PAYMENT header
+            const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Payment': xPaymentHeader }, body: JSON.stringify(body) });
+            const paymentResponse = res.headers.get('X-PAYMENT-RESPONSE');
+            if (paymentResponse) { try { receiptData.payment.settlement = JSON.parse(atob(paymentResponse)); } catch(e) {} }
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            receiptData.result = { random_seed: data.random_seed, tee_type: data.tee_type, attestation: data.attestation };
+            if (data.number !== undefined) receiptData.result.value = data.number;
+            if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
+            if (data.picked !== undefined) receiptData.result.value = data.picked;
+          } else {
+            throw new Error('EVM payment not yet supported in the landing page. Use API with X-PAYMENT header directly.');
           }
-          instructions.push(splToken.createTransferInstruction(fromAta, toAta, fromPubkey, amount));
-          const transaction = new Transaction().add(...instructions);
-          transaction.feePayer = fromPubkey;
-          if (requirements.extra && requirements.extra.feePayer) transaction.feePayer = new PublicKey(requirements.extra.feePayer);
-          const { blockhash } = await connection.getLatestBlockhash('confirmed');
-          transaction.recentBlockhash = blockhash;
-          log('Please approve the transaction in your wallet...');
-          const signedTx = await window.solana.signTransaction(transaction);
-          const serializedTx = signedTx.serialize().toString('base64');
-          const paymentPayload = { x402Version: 1, scheme: requirements.scheme || 'exact', network: 'solana', payload: { transaction: serializedTx } };
-          const xPaymentHeader = btoa(JSON.stringify(paymentPayload));
-          log('Transaction signed, sending payment...');
-
-          // 4. Re-send with X-PAYMENT header
-          const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Payment': xPaymentHeader }, body: JSON.stringify(body) });
-          const paymentResponse = res.headers.get('X-PAYMENT-RESPONSE');
-          if (paymentResponse) { try { receiptData.payment.settlement = JSON.parse(atob(paymentResponse)); } catch(e) {} }
-          const data = await res.json();
-          if (data.error) throw new Error(data.error);
-          receiptData.result = { random_seed: data.random_seed, tee_type: data.tee_type, attestation: data.attestation };
-          if (data.number !== undefined) receiptData.result.value = data.number;
-          if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
-          if (data.picked !== undefined) receiptData.result.value = data.picked;
-        } else {
-          throw new Error('EVM payment not yet supported in the landing page. Use API with X-PAYMENT header directly.');
         }
 
-        // 5. Auto-verify attestation
+        // 4. Auto-verify attestation (for both whitelisted and paid requests)
         log('Verifying attestation...');
         try {
           const attRes = await fetch('/v1/attestation');

@@ -8,7 +8,7 @@ services:
       - NODE_ENV=development
       - PHALA_APP_ID=${PHALA_APP_ID:-}  # Set when deploying dev CVM
       - PAYMENT_WALLET=${PAYMENT_WALLET:-}  # Devnet wallet
-      - WHITELIST=${WHITELIST:-localhost,dev.mysterygift.fun,api-dev.mysterygift.fun,rng-dev.mysterygift.fun}
+      - WHITELIST=${WHITELIST:-localhost,dev.mysterygift.fun,api-dev.mysterygift.fun}
       - API_KEYS=${API_KEYS:-}
       - X402_FACILITATOR_URL=${X402_FACILITATOR_URL:-https://facilitator.payai.network}
       - X402_API_KEY=${X402_API_KEY:-}

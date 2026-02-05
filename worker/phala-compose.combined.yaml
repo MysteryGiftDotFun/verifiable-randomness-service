@@ -1,7 +1,7 @@
 services:
   # Production service (mainnet)
   randomness-prod:
-    image: phantasybot/verifiable-randomness-service:v0.3.0-BETA
+    image: phantasybot/verifiable-randomness-service:v0.3.1-BETA
     ports:
       - '3000:3000'
     environment:
@@ -11,7 +11,7 @@ services:
       - APP_ENVIRONMENT=production
       - PHALA_APP_ID=0fd4d6d4ad7d850389643319dd0e35ad14f578a5
       - PAYMENT_WALLET=${PAYMENT_WALLET:-3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx}
-      - WHITELIST=${WHITELIST:-localhost,mysterygift.fun,api.mysterygift.fun,rng.mysterygift.fun}
+      - WHITELIST=${WHITELIST:-localhost,mysterygift.fun,api.mysterygift.fun}
       - API_KEYS=${API_KEYS:-}
       - X402_FACILITATOR_URL=${X402_FACILITATOR_URL:-https://facilitator.payai.network}
       - X402_API_KEY=${X402_API_KEY:-}
@@ -29,7 +29,7 @@ services:
 
   # Development service (devnet)
   randomness-dev:
-    image: phantasybot/verifiable-randomness-service:v0.3.0-BETA
+    image: phantasybot/verifiable-randomness-service:v0.3.1-BETA
     ports:
       - '3001:3001'
     environment:
@@ -39,7 +39,7 @@ services:
       - APP_ENVIRONMENT=development
       - PHALA_APP_ID=${PHALA_APP_ID_DEV:-}
       - PAYMENT_WALLET=${PAYMENT_WALLET_DEV:-}
-      - WHITELIST=${WHITELIST_DEV:-localhost,dev.mysterygift.fun,api-dev.mysterygift.fun,rng-dev.mysterygift.fun}
+      - WHITELIST=${WHITELIST_DEV:-localhost,dev.mysterygift.fun,api-dev.mysterygift.fun}
       - API_KEYS=${API_KEYS:-}
       - X402_FACILITATOR_URL=${X402_FACILITATOR_URL:-https://facilitator.payai.network}
       - X402_API_KEY=${X402_API_KEY:-}

@@ -8,7 +8,7 @@ services:
       - NODE_ENV=production
       - PHALA_APP_ID=0fd4d6d4ad7d850389643319dd0e35ad14f578a5
       - PAYMENT_WALLET=${PAYMENT_WALLET:-3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx}
-      - WHITELIST=${WHITELIST:-localhost,mysterygift.fun,api.mysterygift.fun,rng.mysterygift.fun}
+      - WHITELIST=${WHITELIST:-localhost,mysterygift.fun,api.mysterygift.fun}
       - API_KEYS=${API_KEYS:-}
       - HELIUS_RPC_URL=${HELIUS_RPC_URL:-}
       - ALCHEMY_RPC_URL=${ALCHEMY_RPC_URL:-}
