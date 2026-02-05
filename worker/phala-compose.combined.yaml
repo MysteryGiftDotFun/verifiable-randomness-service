@@ -1,7 +1,7 @@
 services:
   # Production service (mainnet)
   randomness-prod:
-    image: phantasybot/verifiable-randomness-service:v0.3.4-BETA
+    image: phantasybot/verifiable-randomness-service:v0.3.5-BETA
     ports:
       - '3000:3000'
     environment:
@@ -29,7 +29,7 @@ services:
 
   # Development service (devnet)
   randomness-dev:
-    image: phantasybot/verifiable-randomness-service:v0.3.4-BETA
+    image: phantasybot/verifiable-randomness-service:v0.3.5-BETA
     ports:
       - '3001:3001'
     environment:

@@ -82,15 +82,19 @@ export function renderLandingPage(config: LandingConfig): string {
             { pubkey: new PublicKey(SPL_TOKEN_PROGRAM_ID), isSigner: false, isWritable: false },
           ],
           programId: new PublicKey(ASSOCIATED_TOKEN_PROGRAM_ID),
-          data: Buffer.alloc(0),
+          data: new Uint8Array(0),
         });
       },
 
       createTransferInstruction(source, destination, owner, amount) {
         const { PublicKey, TransactionInstruction } = solanaWeb3;
-        const data = Buffer.alloc(9);
-        data.writeUInt8(3, 0); // Transfer instruction
-        data.writeBigUInt64LE(BigInt(amount), 1);
+        // Build 9-byte transfer instruction data: [3, amount_le_u64]
+        const data = new Uint8Array(9);
+        data[0] = 3; // Transfer instruction
+        const amountBig = BigInt(amount);
+        for (let i = 0; i < 8; i++) {
+          data[1 + i] = Number((amountBig >> BigInt(i * 8)) & BigInt(0xff));
+        }
         return new TransactionInstruction({
           keys: [
             { pubkey: source, isSigner: false, isWritable: true },
