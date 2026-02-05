@@ -1003,8 +1003,29 @@ export function renderLandingPage(config: LandingConfig): string {
         if (selectedNetwork === 'solana') {
           const { Connection, PublicKey, Transaction, SystemProgram } = solanaWeb3;
 
-          // Use mainnet RPC for Solana
-          const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+          // Try multiple RPC endpoints for reliability
+          const RPC_ENDPOINTS = [
+            'https://rpc.ankr.com/solana',
+            'https://solana-mainnet.g.alchemy.com/v2/demo',
+            'https://api.mainnet-beta.solana.com'
+          ];
+
+          let connection;
+          let lastError;
+          for (const rpc of RPC_ENDPOINTS) {
+            try {
+              connection = new Connection(rpc, 'confirmed');
+              await connection.getLatestBlockhash('confirmed'); // Test connection
+              log('Connected to Solana RPC');
+              break;
+            } catch (e) {
+              lastError = e;
+              continue;
+            }
+          }
+          if (!connection) {
+            throw new Error('All Solana RPC endpoints failed: ' + (lastError?.message || 'unknown error'));
+          }
 
           const fromPubkey = new PublicKey(wallet);
           const toPubkey = new PublicKey(requirements.payTo);
