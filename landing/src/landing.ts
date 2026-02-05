@@ -26,7 +26,60 @@ export function renderLandingPage(
 
   <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
   <script src="https://unpkg.com/@solana/web3.js@1.95.8/lib/index.iife.min.js"></script>
-  <script src="https://unpkg.com/@solana/spl-token@0.4.9/lib/index.iife.min.js"></script>
+  <script>
+    // Inline SPL Token helpers (spl-token IIFE not available in v0.4.x)
+    const SPL_TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+    const ASSOCIATED_TOKEN_PROGRAM_ID = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+
+    const splToken = {
+      async getAssociatedTokenAddress(mint, owner) {
+        const { PublicKey } = solanaWeb3;
+        const [address] = await PublicKey.findProgramAddress(
+          [owner.toBuffer(), new PublicKey(SPL_TOKEN_PROGRAM_ID).toBuffer(), mint.toBuffer()],
+          new PublicKey(ASSOCIATED_TOKEN_PROGRAM_ID)
+        );
+        return address;
+      },
+
+      async getAccount(connection, address) {
+        const info = await connection.getAccountInfo(address);
+        if (!info) throw new Error('Account not found');
+        return info;
+      },
+
+      createAssociatedTokenAccountInstruction(payer, ata, owner, mint) {
+        const { PublicKey, TransactionInstruction } = solanaWeb3;
+        return new TransactionInstruction({
+          keys: [
+            { pubkey: payer, isSigner: true, isWritable: true },
+            { pubkey: ata, isSigner: false, isWritable: true },
+            { pubkey: owner, isSigner: false, isWritable: false },
+            { pubkey: mint, isSigner: false, isWritable: false },
+            { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
+            { pubkey: new PublicKey(SPL_TOKEN_PROGRAM_ID), isSigner: false, isWritable: false },
+          ],
+          programId: new PublicKey(ASSOCIATED_TOKEN_PROGRAM_ID),
+          data: Buffer.alloc(0),
+        });
+      },
+
+      createTransferInstruction(source, destination, owner, amount) {
+        const { PublicKey, TransactionInstruction } = solanaWeb3;
+        const data = Buffer.alloc(9);
+        data.writeUInt8(3, 0); // Transfer instruction
+        data.writeBigUInt64LE(BigInt(amount), 1);
+        return new TransactionInstruction({
+          keys: [
+            { pubkey: source, isSigner: false, isWritable: true },
+            { pubkey: destination, isSigner: false, isWritable: true },
+            { pubkey: owner, isSigner: true, isWritable: false },
+          ],
+          programId: new PublicKey(SPL_TOKEN_PROGRAM_ID),
+          data,
+        });
+      }
+    };
+  </script>
 
   <style>
     :root {

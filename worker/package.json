@@ -1,6 +1,6 @@
 {
   "name": "verifiable-randomness-service",
-  "version": "0.3.3-BETA",
+  "version": "0.3.4-BETA",
   "description": "Secure Randomness Generator for Phala TEE with x402 Payment Support",
   "main": "dist/index.js",
   "scripts": {
