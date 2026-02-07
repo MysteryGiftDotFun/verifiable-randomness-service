@@ -34,8 +34,11 @@ export async function commitToArweave(
 ): Promise<ArweaveCommitmentResult> {
   const commitmentHash = computeCommitmentHash(seed, requestHash);
 
+  // PRIVACY: Do NOT include the raw seed in Arweave proofs.
+  // Users verify by computing SHA256(seed + request_hash) and comparing to commitment_hash.
+  // This allows proof verification without exposing the actual random output publicly.
   const payload = {
-    seed,
+    // seed intentionally omitted - verify via commitment_hash = SHA256(seed + request_hash)
     attestation,
     request_hash: requestHash,
     commitment_hash: commitmentHash,

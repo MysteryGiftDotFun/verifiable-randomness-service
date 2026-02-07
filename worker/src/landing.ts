@@ -741,6 +741,49 @@ export function renderLandingPage(config: LandingConfig): string {
               Download Attestation Quote
             </button>
           </div>
+
+          <div class="card" style="margin-top:1rem; border-color:rgba(255, 77, 0, 0.3);">
+            <span class="card-label" style="color:var(--accent);">
+              <iconify-icon icon="ph:archive-box-fill" style="vertical-align:text-bottom; margin-right:0.3rem;"></iconify-icon>
+              Arweave Proof Verification
+            </span>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.8rem; line-height:1.6;">
+              Each response includes an Arweave proof. The proof contains a <code style="color:var(--accent);">commitment_hash</code> but <strong style="color:var(--text-main);">not the seed</strong> (for privacy). Verify like this:
+            </p>
+
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.8rem; line-height:1.7;">
+              <div style="margin-bottom:0.5rem; display:flex; gap:8px;">
+                <span style="color:var(--accent); font-weight:700; min-width:18px;">1.</span>
+                <span>Save the <code style="color:var(--success);">random_seed</code> from your API response</span>
+              </div>
+              <div style="margin-bottom:0.5rem; display:flex; gap:8px;">
+                <span style="color:var(--accent); font-weight:700; min-width:18px;">2.</span>
+                <span>Visit your <code style="color:var(--success);">arweave_url</code> to get the <code style="color:var(--success);">commitment_hash</code></span>
+              </div>
+              <div style="margin-bottom:0.5rem; display:flex; gap:8px;">
+                <span style="color:var(--accent); font-weight:700; min-width:18px;">3.</span>
+                <span>Compute: <code style="color:var(--accent);">SHA256(seed + request_hash)</code></span>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <span style="color:var(--accent); font-weight:700; min-width:18px;">4.</span>
+                <span>If it matches <code style="color:var(--success);">commitment_hash</code> → proof is valid ✓</span>
+              </div>
+            </div>
+
+            <div style="background:rgba(0,0,0,0.4); border:1px solid var(--panel-border); border-radius:8px; padding:0.75rem; overflow-x:auto;">
+              <pre style="font-size:0.65rem; color:var(--text-muted); margin:0; line-height:1.5;"><code style="color:var(--text-main);">// JavaScript/Node.js
+const crypto = require('crypto');
+const expected = crypto
+  .createHash('sha256')
+  .update(response.random_seed)
+  .update(request_hash || '')
+  .digest('hex');
+
+if (expected === arweaveProof.commitment_hash) {
+  console.log('✓ Proof verified!');
+}</code></pre>
+            </div>
+          </div>
         </div>
 
         <!-- INFO -->
