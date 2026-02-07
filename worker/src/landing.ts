@@ -104,6 +104,29 @@ export function renderLandingPage(config: LandingConfig): string {
           programId: new PublicKey(SPL_TOKEN_PROGRAM_ID),
           data,
         });
+      },
+
+      // TransferChecked: includes mint and decimals for verification (required by x402)
+      createTransferCheckedInstruction(source, mint, destination, owner, amount, decimals) {
+        const { PublicKey, TransactionInstruction } = solanaWeb3;
+        // Build 10-byte transferChecked instruction data: [12, amount_le_u64, decimals_u8]
+        const data = new Uint8Array(10);
+        data[0] = 12; // TransferChecked instruction
+        const amountBig = BigInt(amount);
+        for (let i = 0; i < 8; i++) {
+          data[1 + i] = Number((amountBig >> BigInt(i * 8)) & BigInt(0xff));
+        }
+        data[9] = decimals;
+        return new TransactionInstruction({
+          keys: [
+            { pubkey: source, isSigner: false, isWritable: true },
+            { pubkey: mint, isSigner: false, isWritable: false },
+            { pubkey: destination, isSigner: false, isWritable: true },
+            { pubkey: owner, isSigner: true, isWritable: false },
+          ],
+          programId: new PublicKey(SPL_TOKEN_PROGRAM_ID),
+          data,
+        });
       }
     };
   </script>
@@ -527,6 +550,8 @@ export function renderLandingPage(config: LandingConfig): string {
       padding: 1rem;
       border-radius: 8px;
       border: 1px solid var(--panel-border);
+      width: 100%;
+      box-sizing: border-box;
     }
 
     /* Responsive */
@@ -563,6 +588,9 @@ export function renderLandingPage(config: LandingConfig): string {
     .receipt-link { color: var(--accent); text-decoration: none; display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; }
     .receipt-link:hover { text-decoration: underline; }
     .receipt-result { font-size: 1.5rem; font-weight: 700; color: var(--accent); text-align: center; padding: 1rem 0; font-family: var(--font); }
+    .receipt-seed-input { width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); border-radius: 8px; padding: 0.75rem 3rem 0.75rem 1rem; font-family: monospace; font-size: 0.75rem; color: var(--accent); text-align: center; cursor: text; }
+    .receipt-copy-btn { position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: var(--accent); border: none; border-radius: 6px; padding: 0.5rem; cursor: pointer; color: white; display: flex; align-items: center; justify-content: center; }
+    .receipt-copy-btn:hover { background: #ff6a33; }
     .receipt-actions { display: flex; gap: 0.75rem; padding: 1.5rem 2rem; background: rgba(0, 0, 0, 0.2); }
     .receipt-btn { flex: 1; padding: 0.75rem 1rem; border-radius: 8px; font-family: var(--font); font-size: 0.75rem; font-weight: 500; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 0.4rem; }
     .receipt-btn-primary { background: var(--accent); color: white; border: none; }
@@ -661,18 +689,58 @@ export function renderLandingPage(config: LandingConfig): string {
         <!-- VERIFY -->
         <div id="v-verify" class="tab-view">
           <div class="card">
-            <span class="card-label">System Identity</span>
-            <div class="hash-display" style="margin-bottom: 1rem;">APP_ID: ${appId}</div>
+            <span class="card-label">What Can You Verify?</span>
+            <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.6; margin-bottom:0;">
+              This service runs inside an <strong style="color:var(--text-main);">Intel TDX enclave</strong> — a hardware-isolated environment that even we cannot tamper with. You can independently verify:
+            </p>
+            <ul style="font-size:0.8rem; color:var(--text-muted); margin:0.5rem 0 0 1rem; padding:0;">
+              <li>The hardware attestation quote is signed by Intel</li>
+              <li>The compose hash matches our open source code</li>
+              <li>The enclave is running untampered code</li>
+            </ul>
+          </div>
 
-            <span class="card-label">Integrity Hash</span>
-            <div class="hash-display" id="compose-hash">${composeHash}</div>
+          <div class="card">
+            <span class="card-label">System Identity</span>
+            <div class="hash-display" style="margin-bottom: 1rem; font-size:0.7rem;">APP_ID: ${appId}</div>
+
+            <span class="card-label">Compose Hash (Code Fingerprint)</span>
+            <div class="hash-display" id="compose-hash" style="font-size:0.7rem;">${composeHash}</div>
+            <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem;">
+              Compare this hash with <a href="https://github.com/mysterygift/mystery-gift" target="_blank" style="color:var(--accent);">our source code</a> to verify we're running the exact code you expect.
+            </p>
           </div>
 
           <button class="std-btn" onclick="verify()" id="verify-btn">
-            Verify Attestation Signature
+            Quick Verify (Self-Check)
           </button>
+          <div id="verify-res" style="margin-top:0.5rem; display:none;"></div>
 
-          <div id="verify-res" style="margin-top:1rem; display:none;"></div>
+          <div class="card" style="margin-top:1rem; border-color:var(--accent-glow);">
+            <span class="card-label" style="color:var(--accent);">Independent Verification</span>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.8rem;">
+              Don't trust us — verify the attestation yourself using third-party tools:
+            </p>
+
+            <a href="https://proof.t16z.com/" target="_blank" style="text-decoration:none; display:block; margin-bottom:0.5rem;">
+              <button class="std-btn" style="width:100%; background:rgba(52, 211, 153, 0.05); border-color:rgba(52, 211, 153, 0.2); color:var(--success);">
+                <iconify-icon icon="ph:seal-check-fill" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
+                TEE Attestation Explorer
+              </button>
+            </a>
+
+            <a href="https://trust.phala.com/" target="_blank" style="text-decoration:none; display:block; margin-bottom:0.5rem;">
+              <button class="std-btn" style="width:100%;">
+                <iconify-icon icon="ph:shield-check-fill" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
+                Phala Trust Center
+              </button>
+            </a>
+
+            <button class="std-btn" style="width:100%;" onclick="downloadAttestation()">
+              <iconify-icon icon="ph:download-simple-bold" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
+              Download Attestation Quote
+            </button>
+          </div>
         </div>
 
         <!-- INFO -->
@@ -690,7 +758,7 @@ export function renderLandingPage(config: LandingConfig): string {
               <div style="font-size:1.2rem; font-weight:700; color:var(--text-main);">$0.01 <span style="font-size:0.8rem; color:var(--text-muted);">/ req</span></div>
             </div>
             <div style="margin-top:0.8rem; font-size:0.8rem; color:var(--text-muted);">
-              Pay via x402 (${supportedNetworks.join(' / ').toUpperCase()}) &bull; 90% cheaper than Chainlink VRF
+              Pay via x402 (${supportedNetworks.join(' / ').toUpperCase()}) &bull; 90% cheaper than Switchboard VRF
             </div>
           </div>
 
@@ -983,6 +1051,44 @@ export function renderLandingPage(config: LandingConfig): string {
           if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
           if (data.picked !== undefined) receiptData.result.value = data.picked;
           receiptData.payment = { method: 'Free (whitelisted)', amount: '$0.00' };
+
+          // Store commitment (Arweave proof) data
+          if (data.commitment) {
+            receiptData.commitment = {
+              hash: data.commitment.commitment_hash,
+              arweave_tx: data.commitment.arweave_tx,
+              arweave_url: data.commitment.arweave_url,
+            };
+          }
+
+          // Fetch attestation info for free requests too
+          try {
+            const attRes = await fetch('/v1/attestation');
+            const attData = await attRes.json();
+            receiptData.attestation = {
+              app_id: attData.app_id,
+              compose_hash: attData.compose_hash || 'Simulation Mode',
+              tee_type: attData.tee_type,
+              quote_hex: attData.quote_hex || null,
+            };
+            if (attData.quote_hex) {
+              const verifyRes = await fetch('/v1/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ quote_hex: attData.quote_hex }),
+              });
+              const verifyData = await verifyRes.json();
+              receiptData.verification = {
+                valid: verifyData.valid,
+                verified_by: 'Phala Cloud Attestation API',
+              };
+            } else {
+              receiptData.verification = { valid: false, note: 'Simulation mode' };
+            }
+          } catch(e) {
+            receiptData.verification = { valid: false, error: e.message };
+          }
+
           log('Complete! (no payment required)', 'success');
           showReceipt(receiptData);
           return;
@@ -1001,12 +1107,12 @@ export function renderLandingPage(config: LandingConfig): string {
 
         // 3. Build and sign USDC transfer transaction
         if (selectedNetwork === 'solana') {
-          const { Connection, PublicKey, Transaction, SystemProgram } = solanaWeb3;
+          const { Connection, PublicKey, Transaction, TransactionInstruction } = solanaWeb3;
 
           // Try multiple RPC endpoints for reliability
+          // Primary: Helius (paid, reliable), Fallback: Public RPC (rate-limited)
           const RPC_ENDPOINTS = [
-            'https://rpc.ankr.com/solana',
-            'https://solana-mainnet.g.alchemy.com/v2/demo',
+            'https://mainnet.helius-rpc.com/?api-key=2535bd85-aa70-4a06-becd-e51929abdb4f',
             'https://api.mainnet-beta.solana.com'
           ];
 
@@ -1038,21 +1144,62 @@ export function renderLandingPage(config: LandingConfig): string {
 
           log('Preparing SPL token transfer...');
 
-          // Check if destination ATA exists
-          let instructions = [];
+          // Pre-flight: Check user has sufficient USDC
           try {
-            await splToken.getAccount(connection, toAta);
+            const userAccount = await connection.getTokenAccountBalance(fromAta);
+            const userBalance = parseInt(userAccount.value.amount);
+            if (userBalance < amount) {
+              const needed = (amount / 1e6).toFixed(2);
+              const have = (userBalance / 1e6).toFixed(2);
+              throw new Error('Insufficient USDC balance. You need $' + needed + ' USDC but only have $' + have + '.');
+            }
+            log('USDC balance verified: $' + (userBalance / 1e6).toFixed(2));
           } catch (e) {
-            // Create ATA if it doesn't exist
-            instructions.push(
-              splToken.createAssociatedTokenAccountInstruction(fromPubkey, toAta, toPubkey, usdcMint)
-            );
+            if (e.message && e.message.includes('could not find account')) {
+              throw new Error('No USDC found in your wallet. Please add at least $0.01 USDC to continue.');
+            }
+            throw e;
           }
 
-          // Add SPL transfer instruction
-          instructions.push(
-            splToken.createTransferInstruction(fromAta, toAta, fromPubkey, amount)
-          );
+          // Compute Budget Program ID
+          const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey('ComputeBudget111111111111111111111111111111');
+
+          // Inline compute budget instructions (browser-compatible, no Buffer)
+          function createSetComputeUnitLimitInstruction(units) {
+            const data = new Uint8Array(5);
+            data[0] = 2; // SetComputeUnitLimit instruction
+            const view = new DataView(data.buffer);
+            view.setUint32(1, units, true); // little-endian
+            return new TransactionInstruction({
+              keys: [],
+              programId: COMPUTE_BUDGET_PROGRAM_ID,
+              data,
+            });
+          }
+
+          function createSetComputeUnitPriceInstruction(microLamports) {
+            const data = new Uint8Array(9);
+            data[0] = 3; // SetComputeUnitPrice instruction
+            const view = new DataView(data.buffer);
+            // microLamports is u64, write as two u32s (little-endian)
+            view.setUint32(1, microLamports & 0xFFFFFFFF, true);
+            view.setUint32(5, Math.floor(microLamports / 0x100000000), true);
+            return new TransactionInstruction({
+              keys: [],
+              programId: COMPUTE_BUDGET_PROGRAM_ID,
+              data,
+            });
+          }
+
+          // x402 facilitator requires EXACTLY 3 instructions in this order:
+          // 1. setComputeUnitLimit
+          // 2. setComputeUnitPrice
+          // 3. transferChecked (not regular transfer)
+          const instructions = [
+            createSetComputeUnitLimitInstruction(50000),
+            createSetComputeUnitPriceInstruction(1000),
+            splToken.createTransferCheckedInstruction(fromAta, usdcMint, toAta, fromPubkey, amount, 6)
+          ];
 
           const transaction = new Transaction().add(...instructions);
           transaction.feePayer = fromPubkey;
@@ -1067,7 +1214,10 @@ export function renderLandingPage(config: LandingConfig): string {
 
           log('Please approve the transaction in your wallet...');
           const signedTx = await window.solana.signTransaction(transaction);
-          const serializedTx = signedTx.serialize().toString('base64');
+          // Convert Uint8Array to base64 (browser-compatible)
+          // Use requireAllSignatures: false because the facilitator will sign for the fee payer
+          const serializedBytes = signedTx.serialize({ requireAllSignatures: false });
+          const serializedTx = btoa(Array.from(serializedBytes, b => String.fromCharCode(b)).join(''));
 
           // 4. Build X-PAYMENT header
           const paymentPayload = {
@@ -1112,6 +1262,15 @@ export function renderLandingPage(config: LandingConfig): string {
           if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
           if (data.picked !== undefined) receiptData.result.value = data.picked;
 
+          // Store commitment (Arweave proof) data
+          if (data.commitment) {
+            receiptData.commitment = {
+              hash: data.commitment.commitment_hash,
+              arweave_tx: data.commitment.arweave_tx,
+              arweave_url: data.commitment.arweave_url,
+            };
+          }
+
         } else {
           throw new Error('EVM payment not yet supported in the landing page. Use API with X-PAYMENT header directly.');
         }
@@ -1125,6 +1284,7 @@ export function renderLandingPage(config: LandingConfig): string {
             app_id: attData.app_id,
             compose_hash: attData.compose_hash || 'Simulation Mode',
             tee_type: attData.tee_type,
+            quote_hex: attData.quote_hex || null,
           };
 
           if (attData.quote_hex) {
@@ -1195,7 +1355,15 @@ export function renderLandingPage(config: LandingConfig): string {
 
         <div class="receipt-section" style="text-align: center; padding: 1.5rem 2rem;">
           <div class="receipt-section-title">Result</div>
-          <div class="receipt-result">\${resultDisplay}</div>
+          \${resultDisplay.length > 20
+            ? \`<div style="position: relative;">
+                <input type="text" readonly value="\${resultDisplay}" class="receipt-seed-input" onclick="this.select()">
+                <button class="receipt-copy-btn" onclick="navigator.clipboard.writeText('\${resultDisplay}'); showToast('Copied!');">
+                  <iconify-icon icon="ph:copy"></iconify-icon>
+                </button>
+              </div>\`
+            : \`<div class="receipt-result">\${resultDisplay}</div>\`
+          }
         </div>
 
         <div class="receipt-section">
@@ -1226,13 +1394,23 @@ export function renderLandingPage(config: LandingConfig): string {
             <span class="receipt-label">TEE Type</span>
             <span class="receipt-value">\${data.attestation?.tee_type || 'simulation'}</span>
           </div>
-          <div class="receipt-row">
+          <div class="receipt-row" style="flex-direction: column; gap: 0.5rem;">
             <span class="receipt-label">App ID</span>
-            <span class="receipt-value">\${(data.attestation?.app_id || 'N/A').slice(0, 16)}...</span>
+            <div style="position: relative;">
+              <input type="text" readonly value="\${data.attestation?.app_id || 'N/A'}" class="receipt-seed-input" style="font-size: 0.65rem; text-align: left;" onclick="this.select()">
+              <button class="receipt-copy-btn" onclick="navigator.clipboard.writeText('\${data.attestation?.app_id || ''}'); showToast('App ID copied!');">
+                <iconify-icon icon="ph:copy"></iconify-icon>
+              </button>
+            </div>
           </div>
-          <div class="receipt-row">
+          <div class="receipt-row" style="flex-direction: column; gap: 0.5rem;">
             <span class="receipt-label">Compose Hash</span>
-            <span class="receipt-value">\${(data.attestation?.compose_hash || 'N/A').slice(0, 12)}...</span>
+            <div style="position: relative;">
+              <input type="text" readonly value="\${data.attestation?.compose_hash || 'N/A'}" class="receipt-seed-input" style="font-size: 0.7rem; text-align: left;" onclick="this.select()">
+              <button class="receipt-copy-btn" onclick="navigator.clipboard.writeText('\${data.attestation?.compose_hash || ''}'); showToast('Compose Hash copied!');">
+                <iconify-icon icon="ph:copy"></iconify-icon>
+              </button>
+            </div>
           </div>
           <div class="receipt-row" style="margin-top: 0.75rem;">
             <span class="receipt-label">Status</span>
@@ -1241,7 +1419,53 @@ export function renderLandingPage(config: LandingConfig): string {
               : '<span class="receipt-value" style="color: var(--text-muted);">Simulation Mode</span>'
             }
           </div>
+          \${data.attestation?.quote_hex ? \`
+          <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--panel-border);">
+            <div style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+              <iconify-icon icon="ph:info" style="vertical-align: text-bottom;"></iconify-icon>
+              Don't trust our verification — verify the attestation yourself:
+            </div>
+            <a href="https://proof.t16z.com/" target="_blank" style="text-decoration: none; display: block; margin-bottom: 0.5rem;">
+              <button style="width: 100%; padding: 0.6rem; background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 8px; color: var(--success); font-size: 0.75rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
+                <iconify-icon icon="ph:arrow-square-out"></iconify-icon>
+                Verify at proof.t16z.com
+              </button>
+            </a>
+            <button onclick="navigator.clipboard.writeText(window.currentReceipt?.attestation?.quote_hex || ''); showToast('Quote copied! Paste in explorer.');" style="width: 100%; padding: 0.6rem; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 8px; color: var(--text-main); font-size: 0.75rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
+              <iconify-icon icon="ph:copy"></iconify-icon>
+              Copy Attestation Quote
+            </button>
+          </div>
+          \` : ''}
         </div>
+
+        \${data.commitment?.arweave_url ? \`
+        <div class="receipt-section">
+          <div class="receipt-section-title">
+            <iconify-icon icon="ph:archive-box-fill" style="vertical-align: text-bottom; margin-right: 0.3rem;"></iconify-icon>
+            Permanent Proof
+          </div>
+          <div class="receipt-row" style="flex-direction: column; gap: 0.5rem;">
+            <span class="receipt-label">Arweave Transaction</span>
+            <div style="position: relative;">
+              <input type="text" readonly value="\${data.commitment.arweave_tx}" class="receipt-seed-input" style="font-size: 0.65rem; text-align: left;" onclick="this.select()">
+              <button class="receipt-copy-btn" onclick="navigator.clipboard.writeText('\${data.commitment.arweave_tx}'); showToast('TX ID copied!');">
+                <iconify-icon icon="ph:copy"></iconify-icon>
+              </button>
+            </div>
+          </div>
+          <a href="\${data.commitment.arweave_url}" target="_blank" style="text-decoration: none; display: block; margin-top: 0.75rem;">
+            <button style="width: 100%; padding: 0.7rem; background: linear-gradient(135deg, rgba(255, 77, 0, 0.15) 0%, rgba(255, 77, 0, 0.05) 100%); border: 1px solid rgba(255, 77, 0, 0.3); border-radius: 8px; color: var(--accent); font-size: 0.75rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+              <iconify-icon icon="ph:arrow-square-out"></iconify-icon>
+              View Proof on Arweave
+            </button>
+          </a>
+          <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.75rem; line-height: 1.5;">
+            <iconify-icon icon="ph:share-network" style="vertical-align: text-bottom;"></iconify-icon>
+            Share this link with your users — they can independently verify the randomness was generated in a TEE.
+          </p>
+        </div>
+        \` : ''}
 
         <div class="receipt-actions">
           <button class="receipt-btn receipt-btn-secondary" onclick="copyReceipt()">
@@ -1307,12 +1531,36 @@ export function renderLandingPage(config: LandingConfig): string {
 
         const box = document.getElementById('verify-res');
         box.style.display = 'block';
-        if(res.valid) box.innerHTML = '<div class="log-success">>> HARDWARE SIGNATURE VALIDATED<br>Intel TDX Enclave Confirmed</div>';
+        if(res.valid) box.innerHTML = '<div class="log-success" style="font-size:0.8rem;">>> Self-check passed (verify independently above)</div>';
         else throw new Error('Invalid');
       } catch(e) {
         document.getElementById('verify-res').innerHTML = '<div class="log-error">>> VERIFICATION FAILED</div>';
       }
-      btn.innerText = 'Verify Attestation Signature';
+      btn.innerText = 'Quick Verify (Self-Check)';
+    }
+
+    async function downloadAttestation() {
+      try {
+        log('Fetching attestation data...');
+        const att = await fetch('/v1/attestation').then(r=>r.json());
+        if (att.error) throw new Error(att.error);
+
+        const data = JSON.stringify(att, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'tee-attestation-' + (att.app_id || 'unknown') + '.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        log('Attestation downloaded. Upload to proof.t16z.com to verify.');
+        showToast('Attestation downloaded!');
+      } catch(e) {
+        log('Failed to download attestation: ' + e.message);
+        showToast('Download failed');
+      }
     }
 
     // Fetch compose hash on load

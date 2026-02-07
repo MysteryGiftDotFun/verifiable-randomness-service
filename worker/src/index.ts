@@ -66,6 +66,9 @@ const x402Server = new X402Server({
   facilitatorUrl: X402_FACILITATOR_URL,
 });
 
+// Facilitator fee payer for Solana networks (from https://facilitator.payai.network/supported)
+const SOLANA_FEE_PAYER = '2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4';
+
 // Build PaymentRequirements for each supported network
 const paymentRequirementsByNetwork: Record<string, PaymentRequirements> = {};
 for (const network of SUPPORTED_NETWORKS) {
@@ -77,6 +80,8 @@ for (const network of SUPPORTED_NETWORKS) {
     resource: `https://rng.mysterygift.fun/v1/randomness`,
     description: 'TEE Randomness Request',
     maxTimeoutSeconds: 60,
+    // Include facilitator's fee payer for Solana networks
+    extra: network.includes('solana') ? { feePayer: SOLANA_FEE_PAYER } : undefined,
   });
 }
 
@@ -86,7 +91,7 @@ let TEE_INFO: {
   compose_hash: string;
   instance_id: string;
 } = {
-  app_id: process.env.PHALA_APP_ID || '0fd4d6d4ad7d850389643319dd0e35ad14f578a5',
+  app_id: process.env.PHALA_APP_ID || '4379c582b5c9cf28473de17932e9d62b4eb15995',
   compose_hash: '',
   instance_id: '',
 };
@@ -870,7 +875,8 @@ app.get('/v1/stats', (req: Request, res: Response) => {
 app.get('/', (_req: Request, res: Response) => {
   const appId = TEE_INFO.app_id;
   const composeHash = TEE_INFO.compose_hash || 'Loading...';
-  const nodeUrl = `https://${appId}-8090.dstack-pha-prod5.phala.network/`;
+  const cluster = process.env.PHALA_CLUSTER || 'prod9';
+  const nodeUrl = `https://${appId}-8090.dstack-pha-${cluster}.phala.network/`;
 
   const html = renderLandingPage({
     version: VERSION,
