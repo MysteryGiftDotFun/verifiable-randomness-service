@@ -5,6 +5,11 @@ node_modules/
 dist/
 .next/
 build/
+*.tsbuildinfo
+*.tgz
+
+# Vendored package copy (canonical source is packages/x402/)
+worker/.x402-pkg/
 
 # Environment files
 .env
