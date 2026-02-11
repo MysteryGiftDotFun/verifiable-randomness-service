@@ -1155,7 +1155,6 @@ if (expected === arweaveProof.commitment_hash) {
           // Try multiple RPC endpoints for reliability
           // Primary: Helius (paid, reliable), Fallback: Public RPC (rate-limited)
           const RPC_ENDPOINTS = [
-            'https://mainnet.helius-rpc.com/?api-key=2535bd85-aa70-4a06-becd-e51929abdb4f',
             'https://api.mainnet-beta.solana.com'
           ];
 
