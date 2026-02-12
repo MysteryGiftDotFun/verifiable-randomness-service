@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "PORT=3006 ts-node src/index.ts"
   },
   "dependencies": {
     "@sentry/node": "^7.99.0",
