@@ -12,6 +12,7 @@ import {
   ArweaveCommitmentResult,
 } from './commitment';
 import { LRUCache } from 'lru-cache';
+import Redis from 'ioredis';
 import rateLimit from 'express-rate-limit';
 import { X402Server } from 'x402';
 import type { PaymentRequirements, PaymentPayload } from 'x402';
@@ -178,16 +179,98 @@ async function runCommitments(
   }
 }
 
-// Replay protection: cache SHA-256 hash of X-PAYMENT payloads
+// Redis client for persistent replay protection
+let redis: Redis | null = null;
+let redisAvailable = false;
+
+function initRedis(): void {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) {
+    console.warn('[TEE] REDIS_URL not set, using in-memory LRU cache (replay protection resets on restart)');
+    return;
+  }
+
+  redis = new Redis(redisUrl, {
+    maxRetriesPerRequest: 3,
+    retryStrategy(times) {
+      if (times > 10) return null; // Stop retrying after 10 attempts
+      return Math.min(times * 200, 5000);
+    },
+    lazyConnect: true,
+  });
+
+  redis.on('connect', () => {
+    redisAvailable = true;
+    console.log('[TEE] Redis connected — replay protection is persistent');
+  });
+
+  redis.on('error', (err) => {
+    if (redisAvailable) {
+      console.error('[TEE] Redis error, falling back to in-memory LRU:', err.message);
+    }
+    redisAvailable = false;
+  });
+
+  redis.on('close', () => {
+    redisAvailable = false;
+    console.warn('[TEE] Redis connection closed, falling back to in-memory LRU');
+  });
+
+  redis.connect().catch((err) => {
+    console.warn('[TEE] Redis initial connection failed, using in-memory LRU:', err.message);
+  });
+}
+
+initRedis();
+
+// In-memory LRU fallback when Redis is unavailable
 const usedPayloadHashes = new LRUCache<string, boolean>({
   max: 10000,
   ttl: 3600000, // 1 hour TTL
   ttlAutopurge: true,
 });
 
+// Replay protection helpers
+async function hasPayloadHash(hash: string): Promise<boolean> {
+  if (redisAvailable && redis) {
+    try {
+      const exists = await redis.exists(`replay:${hash}`);
+      return exists === 1;
+    } catch {
+      // Redis failed, fall through to LRU
+    }
+  }
+  return usedPayloadHashes.has(hash);
+}
+
+async function addPayloadHash(hash: string): Promise<void> {
+  if (redisAvailable && redis) {
+    try {
+      // Permanent storage — no expiry, survives restarts
+      await redis.set(`replay:${hash}`, '1');
+    } catch {
+      // Redis failed, fall through to LRU
+    }
+  }
+  // Always write to LRU as backup
+  usedPayloadHashes.set(hash, true);
+}
+
+async function removePayloadHash(hash: string): Promise<void> {
+  if (redisAvailable && redis) {
+    try {
+      await redis.del(`replay:${hash}`);
+    } catch {
+      // Redis failed, fall through to LRU
+    }
+  }
+  usedPayloadHashes.delete(hash);
+}
+
 // Log cache stats periodically
 setInterval(() => {
-  console.log(`[TEE] Payment hash cache: ${usedPayloadHashes.size}/${usedPayloadHashes.max} entries`);
+  const redisStatus = redisAvailable ? 'connected' : 'disconnected';
+  console.log(`[TEE] Replay protection: redis=${redisStatus}, lru_fallback=${usedPayloadHashes.size}/${usedPayloadHashes.max}`);
 }, 3600000);
 
 // Log payment configuration on startup
@@ -331,7 +414,7 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
 
     // Replay protection: hash the payload
     const payloadHash = crypto.createHash('sha256').update(paymentHeader).digest('hex');
-    if (usedPayloadHashes.has(payloadHash)) {
+    if (await hasPayloadHash(payloadHash)) {
       console.warn(`[TEE] Replay attempt detected: ${payloadHash.slice(0, 16)}`);
       res.status(402).json({
         x402Version: 1,
@@ -339,12 +422,12 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
       });
       return;
     }
-    usedPayloadHashes.set(payloadHash, true);
+    await addPayloadHash(payloadHash);
 
     // Find matching payment requirements for the network
     const requirements = paymentRequirementsByNetwork[paymentPayload.network];
     if (!requirements) {
-      usedPayloadHashes.delete(payloadHash);
+      await removePayloadHash(payloadHash);
       res.status(402).json({
         x402Version: 1,
         error: `Unsupported network: ${paymentPayload.network}`,
@@ -357,7 +440,7 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
     const verification = await x402Server.verify(paymentPayload, requirements);
 
     if (!verification.isValid) {
-      usedPayloadHashes.delete(payloadHash);
+      await removePayloadHash(payloadHash);
       console.warn(`[TEE] Payment invalid: ${verification.invalidReason}`);
       res.status(402).json({
         x402Version: 1,

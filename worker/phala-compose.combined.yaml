@@ -1,4 +1,17 @@
 services:
+  # Redis for persistent replay protection
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    restart: always
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   # Production service (mainnet)
   randomness-prod:
     image: phantasybot/verifiable-randomness-service:v0.3.22-BETA
@@ -18,8 +31,12 @@ services:
       - SUPPORTED_NETWORKS=${SUPPORTED_NETWORKS:-solana}
       - ARWEAVE_ENABLED=${ARWEAVE_ENABLED:-true}
       - PHALA_CLUSTER=${PHALA_CLUSTER:-prod9}
+      - REDIS_URL=redis://redis:6379
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: always
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:3000/v1/health']
@@ -47,8 +64,12 @@ services:
       - SUPPORTED_NETWORKS=${SUPPORTED_NETWORKS:-solana,base}
       - ARWEAVE_ENABLED=${ARWEAVE_ENABLED:-true}
       - PHALA_CLUSTER=${PHALA_CLUSTER:-prod9}
+      - REDIS_URL=redis://redis:6379
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: always
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:3001/v1/health']
@@ -56,3 +77,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+volumes:
+  redis-data:
