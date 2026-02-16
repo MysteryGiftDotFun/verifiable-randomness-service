@@ -27,7 +27,7 @@ app.use(
     origin:
       process.env.NODE_ENV === 'production'
         ? ['https://mysterygift.fun', 'https://rng.mysterygift.fun', /\.mysterygift\.fun$/]
-        : true, // Allow all in development
+        : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174'],
     credentials: true,
     optionsSuccessStatus: 200,
   })
