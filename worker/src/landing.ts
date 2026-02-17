@@ -31,8 +31,9 @@ export function renderLandingPage(config: LandingConfig): string {
     environment,
   } = config;
 
-  const envBadgeClass = environment === 'production' ? 'production' : 'development';
-  const envBadgeText = environment === 'production' ? 'PROD' : 'DEV';
+  const envBadgeClass =
+    environment === "production" ? "production" : "development";
+  const envBadgeText = environment === "production" ? "PROD" : "DEV";
   const networksJson = JSON.stringify(supportedNetworks);
 
   return `
@@ -676,7 +677,7 @@ export function renderLandingPage(config: LandingConfig): string {
 
             <div style="margin-bottom:0.5rem; font-size:0.75rem; color:var(--text-muted);">Network</div>
             <div class="toggle-group" id="network-toggle">
-              ${supportedNetworks.map((n, i) => `<button class="toggle-opt${i === 0 ? ' active' : ''}" id="net-${n}" onclick="setNetwork('${n}')"><iconify-icon icon="${n === 'solana' ? 'token:sol' : 'token:eth'}" style="vertical-align:middle; margin-right:4px;"></iconify-icon>${n.toUpperCase()}</button>`).join('\n              ')}
+              ${supportedNetworks.map((n, i) => `<button class="toggle-opt${i === 0 ? " active" : ""}" id="net-${n}" onclick="setNetwork('${n}')"><iconify-icon icon="${n === "solana" ? "token:sol" : "token:eth"}" style="vertical-align:middle; margin-right:4px;"></iconify-icon>${n.toUpperCase()}</button>`).join("\n              ")}
             </div>
           </div>
 
@@ -801,7 +802,7 @@ if (expected === arweaveProof.commitment_hash) {
               <div style="font-size:1.2rem; font-weight:700; color:var(--text-main);">$0.01 <span style="font-size:0.8rem; color:var(--text-muted);">/ req</span></div>
             </div>
             <div style="margin-top:0.8rem; font-size:0.8rem; color:var(--text-muted);">
-              Pay via x402 (${supportedNetworks.join(' / ').toUpperCase()}) &bull; 90% cheaper than Switchboard VRF
+              Pay via x402 (${supportedNetworks.join(" / ").toUpperCase()}) &bull; 90% cheaper than Switchboard VRF
             </div>
           </div>
 
@@ -815,8 +816,8 @@ if (expected === arweaveProof.commitment_hash) {
           <div class="card">
             <span class="card-label">Service Info</span>
             <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.7;">
-              <div>Arweave Proofs: <strong style="color:var(--text-main);">${arweaveEnabled ? 'Enabled' : 'Disabled'}</strong></div>
-              <div>Networks: <strong style="color:var(--text-main);">${supportedNetworks.join(', ')}</strong></div>
+              <div>Arweave Proofs: <strong style="color:var(--text-main);">${arweaveEnabled ? "Enabled" : "Disabled"}</strong></div>
+              <div>Networks: <strong style="color:var(--text-main);">${supportedNetworks.join(", ")}</strong></div>
               <div>Facilitator: <strong style="color:var(--text-main);">PayAI</strong></div>
             </div>
           </div>
@@ -837,7 +838,7 @@ if (expected === arweaveProof.commitment_hash) {
               </div>
               <div style="margin-bottom:0.8rem; display:flex; gap:10px;">
                 <span style="color:var(--accent); font-weight:700;">3.</span>
-                <span>Choose network (${supportedNetworks.join(' / ')})</span>
+                <span>Choose network (${supportedNetworks.join(" / ")})</span>
               </div>
               <div style="display:flex; gap:10px;">
                 <span style="color:var(--accent); font-weight:700;">4.</span>
@@ -926,6 +927,9 @@ if (expected === arweaveProof.commitment_hash) {
       </div>
 
       <div class="legal-footer">
+        <div style="margin-bottom:0.5rem; padding:0.5rem; background:rgba(255,149,0,0.1); border-radius:6px; font-size:0.7rem;">
+          <strong style="color:#FF9500;">BETA SOFTWARE</strong> — Use at your own risk. This is experimental software.
+        </div>
         &copy; 2026 MYSTERY GIFT &bull; <a href="/terms" style="color:var(--text-muted)">Terms</a> &bull; <a href="/privacy" style="color:var(--text-muted)">Privacy</a> &bull; <a href="https://x.com/mysterygift_fun" target="_blank" style="color:var(--text-muted)">X</a>
       </div>
     </div>

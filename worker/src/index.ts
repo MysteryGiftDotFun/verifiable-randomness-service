@@ -1,22 +1,22 @@
-import 'dotenv/config';
-import express, { Request, Response, NextFunction } from 'express';
-import crypto from 'crypto';
-import cors from 'cors';
-import path from 'path';
-import fs from 'fs';
-import { DstackClient } from '@phala/dstack-sdk';
-import { Keypair } from '@solana/web3.js';
+import "dotenv/config";
+import express, { Request, Response, NextFunction } from "express";
+import crypto from "crypto";
+import cors from "cors";
+import path from "path";
+import fs from "fs";
+import { DstackClient } from "@phala/dstack-sdk";
+import { Keypair } from "@solana/web3.js";
 import {
   commitToArweave,
   computeCommitmentHash,
   ArweaveCommitmentResult,
-} from './commitment';
-import { LRUCache } from 'lru-cache';
-import Redis from 'ioredis';
-import rateLimit from 'express-rate-limit';
-import { X402Server } from 'x402';
-import type { PaymentRequirements, PaymentPayload } from 'x402';
-import { renderLandingPage } from './landing';
+} from "./commitment";
+import { LRUCache } from "lru-cache";
+import Redis from "ioredis";
+import rateLimit from "express-rate-limit";
+import { X402Server } from "x402";
+import type { PaymentRequirements, PaymentPayload } from "x402";
+import { renderLandingPage } from "./landing";
 
 const app = express();
 
@@ -26,49 +26,72 @@ app.use(express.json());
 app.use(
   cors({
     origin:
-      process.env.NODE_ENV === 'production'
-        ? ['https://mysterygift.fun', 'https://rng.mysterygift.fun', /\.mysterygift\.fun$/]
-        : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174'],
+      process.env.NODE_ENV === "production"
+        ? [
+            "https://mysterygift.fun",
+            "https://rng.mysterygift.fun",
+            /\.mysterygift\.fun$/,
+          ]
+        : [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:5174",
+          ],
     credentials: true,
     optionsSuccessStatus: 200,
-  })
+  }),
 );
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const PORT = parseInt(process.env.PORT || "3000", 10);
 
 // Configuration
 const PRICE_PER_REQUEST_CENTS = 1; // $0.01 per attestation
-const WHITELIST = (process.env.WHITELIST || '').split(',').filter(Boolean);
-const API_KEYS = (process.env.API_KEYS || '').split(',').filter(Boolean);
-const PAYMENT_WALLET = process.env.PAYMENT_WALLET || '3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx';
+const WHITELIST = (process.env.WHITELIST || "").split(",").filter(Boolean);
+const API_KEYS = (process.env.API_KEYS || "").split(",").filter(Boolean);
+
+const PAYMENT_WALLET = (() => {
+  const wallet = process.env.PAYMENT_WALLET;
+  const environment =
+    process.env.ENVIRONMENT || process.env.NODE_ENV || "development";
+  if (!wallet) {
+    if (environment === "production") {
+      throw new Error("CRITICAL: PAYMENT_WALLET must be set in production");
+    }
+    console.warn("[Config] PAYMENT_WALLET not set, using default dev wallet");
+    return "3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx";
+  }
+  return wallet;
+})();
 
 // Load version from package.json
-const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
+const packageJson = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "../package.json"), "utf-8"),
+);
 const VERSION = packageJson.version;
 
 // x402 Facilitator Configuration
 const X402_FACILITATOR_URL =
-  process.env.X402_FACILITATOR_URL || 'https://facilitator.payai.network';
-const SUPPORTED_NETWORKS = (process.env.SUPPORTED_NETWORKS || 'solana')
-  .split(',')
+  process.env.X402_FACILITATOR_URL || "https://facilitator.payai.network";
+const SUPPORTED_NETWORKS = (process.env.SUPPORTED_NETWORKS || "solana")
+  .split(",")
   .map((n) => n.trim())
   .filter(Boolean);
 
 // USDC mint addresses per network
 const USDC_ASSETS: Record<string, string> = {
-  solana: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-  base: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  solana: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  base: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
 };
 
 // USDC has 6 decimals; $0.01 = 10000 base units
-const PRICE_BASE_UNITS = '10000';
+const PRICE_BASE_UNITS = "10000";
 
 const x402Server = new X402Server({
   facilitatorUrl: X402_FACILITATOR_URL,
 });
 
 // Facilitator fee payer for Solana networks (from https://facilitator.payai.network/supported)
-const SOLANA_FEE_PAYER = '2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4';
+const SOLANA_FEE_PAYER = "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4";
 
 // Build PaymentRequirements for each supported network
 const paymentRequirementsByNetwork: Record<string, PaymentRequirements> = {};
@@ -79,10 +102,12 @@ for (const network of SUPPORTED_NETWORKS) {
     asset: USDC_ASSETS[network] || USDC_ASSETS.solana,
     payTo: PAYMENT_WALLET,
     resource: `https://rng.mysterygift.fun/v1/randomness`,
-    description: 'TEE Randomness Request',
+    description: "TEE Randomness Request",
     maxTimeoutSeconds: 60,
     // Include facilitator's fee payer for Solana networks
-    extra: network.includes('solana') ? { feePayer: SOLANA_FEE_PAYER } : undefined,
+    extra: network.includes("solana")
+      ? { feePayer: SOLANA_FEE_PAYER }
+      : undefined,
   });
 }
 
@@ -92,13 +117,14 @@ let TEE_INFO: {
   compose_hash: string;
   instance_id: string;
 } = {
-  app_id: process.env.PHALA_APP_ID || '4379c582b5c9cf28473de17932e9d62b4eb15995',
-  compose_hash: '',
-  instance_id: '',
+  app_id:
+    process.env.PHALA_APP_ID || "4379c582b5c9cf28473de17932e9d62b4eb15995",
+  compose_hash: "",
+  instance_id: "",
 };
 
 // Arweave immutable proof configuration
-const ARWEAVE_ENABLED = process.env.ARWEAVE_ENABLED !== 'false'; // Enabled by default
+const ARWEAVE_ENABLED = process.env.ARWEAVE_ENABLED !== "false"; // Enabled by default
 
 // TEE-derived commitment keypair (for Arweave uploads via Turbo SDK)
 let commitmentKeypair: Keypair | null = null;
@@ -112,23 +138,35 @@ async function getCommitmentKeypair(): Promise<Keypair | null> {
 
   try {
     const dstack = getDstackClient();
-    if (!dstack) throw new Error('dStack client not initialized');
+    if (!dstack) throw new Error("dStack client not initialized");
 
-    const keyResponse = await dstack.getKey('/', 'mystery-gift-rng-commitment-v1');
+    const keyResponse = await dstack.getKey(
+      "/",
+      "mystery-gift-rng-commitment-v1",
+    );
     const seed = keyResponse.key.subarray(0, 32);
     commitmentKeypair = Keypair.fromSeed(seed);
-    console.log(`[TEE] Commitment keypair derived: ${commitmentKeypair.publicKey.toBase58()}`);
+    console.log(
+      `[TEE] Commitment keypair derived: ${commitmentKeypair.publicKey.toBase58()}`,
+    );
     return commitmentKeypair;
   } catch (e) {
-    if (process.env.NODE_ENV === 'production') {
-      console.error('[TEE] Failed to derive commitment keypair in production:', e);
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[TEE] Failed to derive commitment keypair in production:",
+        e,
+      );
       return null;
     }
 
-    console.warn('[TEE] Commitment keypair derivation failed (simulation mode), using fallback');
+    console.warn(
+      "[TEE] Commitment keypair derivation failed (simulation mode), using fallback",
+    );
     const fallbackSeed = new Uint8Array(32).fill(7); // Deterministic fallback for dev
     commitmentKeypair = Keypair.fromSeed(fallbackSeed);
-    console.log(`[TEE] Dev commitment keypair: ${commitmentKeypair.publicKey.toBase58()}`);
+    console.log(
+      `[TEE] Dev commitment keypair: ${commitmentKeypair.publicKey.toBase58()}`,
+    );
     return commitmentKeypair;
   }
 }
@@ -142,7 +180,7 @@ async function runCommitments(
   requestHash: string,
   attestation: string,
   endpoint: string,
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
 ): Promise<{
   commitment_hash: string;
   arweave_tx: string | null;
@@ -152,7 +190,9 @@ async function runCommitments(
 
   const keypair = await getCommitmentKeypair();
   if (!keypair) {
-    console.warn('[TEE] Commitment keypair unavailable, skipping Arweave upload');
+    console.warn(
+      "[TEE] Commitment keypair unavailable, skipping Arweave upload",
+    );
     return null;
   }
 
@@ -161,7 +201,13 @@ async function runCommitments(
 
   try {
     const arweaveResult = await commitToArweave(
-      seed, attestation, requestHash, endpoint, appId, keypair, metadata
+      seed,
+      attestation,
+      requestHash,
+      endpoint,
+      appId,
+      keypair,
+      metadata,
     );
 
     return {
@@ -170,7 +216,7 @@ async function runCommitments(
       arweave_url: arweaveResult.arweave_url,
     };
   } catch (e) {
-    console.warn('[TEE] Arweave commitment failed:', e);
+    console.warn("[TEE] Arweave commitment failed:", e);
     return {
       commitment_hash: commitmentHash,
       arweave_tx: null,
@@ -186,7 +232,9 @@ let redisAvailable = false;
 function initRedis(): void {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
-    console.warn('[TEE] REDIS_URL not set, using in-memory LRU cache (replay protection resets on restart)');
+    console.warn(
+      "[TEE] REDIS_URL not set, using in-memory LRU cache (replay protection resets on restart)",
+    );
     return;
   }
 
@@ -199,25 +247,33 @@ function initRedis(): void {
     lazyConnect: true,
   });
 
-  redis.on('connect', () => {
+  redis.on("connect", () => {
     redisAvailable = true;
-    console.log('[TEE] Redis connected — replay protection is persistent');
+    console.log("[TEE] Redis connected — replay protection is persistent");
   });
 
-  redis.on('error', (err) => {
+  redis.on("error", (err) => {
     if (redisAvailable) {
-      console.error('[TEE] Redis error, falling back to in-memory LRU:', err.message);
+      console.error(
+        "[TEE] Redis error, falling back to in-memory LRU:",
+        err.message,
+      );
     }
     redisAvailable = false;
   });
 
-  redis.on('close', () => {
+  redis.on("close", () => {
     redisAvailable = false;
-    console.warn('[TEE] Redis connection closed, falling back to in-memory LRU');
+    console.warn(
+      "[TEE] Redis connection closed, falling back to in-memory LRU",
+    );
   });
 
   redis.connect().catch((err) => {
-    console.warn('[TEE] Redis initial connection failed, using in-memory LRU:', err.message);
+    console.warn(
+      "[TEE] Redis initial connection failed, using in-memory LRU:",
+      err.message,
+    );
   });
 }
 
@@ -247,7 +303,7 @@ async function addPayloadHash(hash: string): Promise<void> {
   if (redisAvailable && redis) {
     try {
       // Permanent storage — no expiry, survives restarts
-      await redis.set(`replay:${hash}`, '1');
+      await redis.set(`replay:${hash}`, "1");
     } catch {
       // Redis failed, fall through to LRU
     }
@@ -269,13 +325,15 @@ async function removePayloadHash(hash: string): Promise<void> {
 
 // Log cache stats periodically
 setInterval(() => {
-  const redisStatus = redisAvailable ? 'connected' : 'disconnected';
-  console.log(`[TEE] Replay protection: redis=${redisStatus}, lru_fallback=${usedPayloadHashes.size}/${usedPayloadHashes.max}`);
+  const redisStatus = redisAvailable ? "connected" : "disconnected";
+  console.log(
+    `[TEE] Replay protection: redis=${redisStatus}, lru_fallback=${usedPayloadHashes.size}/${usedPayloadHashes.max}`,
+  );
 }, 3600000);
 
 // Log payment configuration on startup
 console.log(`[TEE] x402 facilitator: ${X402_FACILITATOR_URL}`);
-console.log(`[TEE] Supported networks: ${SUPPORTED_NETWORKS.join(', ')}`);
+console.log(`[TEE] Supported networks: ${SUPPORTED_NETWORKS.join(", ")}`);
 
 // dStack Client for Attestation
 let client: DstackClient | null = null;
@@ -284,8 +342,8 @@ function getDstackClient(): DstackClient | null {
   if (client) return client;
   try {
     client = new DstackClient();
-    TEE_TYPE = 'tdx';
-    console.log('[TEE] dStack client initialized successfully');
+    TEE_TYPE = "tdx";
+    console.log("[TEE] dStack client initialized successfully");
     return client;
   } catch (e) {
     // Check silently, will retry next time
@@ -296,10 +354,12 @@ function getDstackClient(): DstackClient | null {
 // Initialize on startup if possible
 getDstackClient();
 if (!client) {
-  console.log('[TEE] dStack socket not found, client disabled (simulation mode)');
+  console.log(
+    "[TEE] dStack socket not found, client disabled (simulation mode)",
+  );
 }
 
-let TEE_TYPE = 'simulation';
+let TEE_TYPE = "simulation";
 
 // Usage tracking (in-memory for now, use Redis/DB in production)
 const usageStats = {
@@ -313,7 +373,7 @@ const usageStats = {
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 100, // 100 requests per minute per IP
-  message: { error: 'Too many requests, please slow down' },
+  message: { error: "Too many requests, please slow down" },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -323,17 +383,21 @@ const paidLimiter = rateLimit({
   max: 20, // 20 paid requests per minute
   keyGenerator: (req) => {
     // Rate limit by payment payload hash OR IP
-    const paymentHeader = req.get('X-Payment');
+    const paymentHeader = req.get("X-Payment");
     if (paymentHeader) {
-      return crypto.createHash('sha256').update(paymentHeader).digest('hex').slice(0, 16);
+      return crypto
+        .createHash("sha256")
+        .update(paymentHeader)
+        .digest("hex")
+        .slice(0, 16);
     }
-    return req.ip || 'unknown';
+    return req.ip || "unknown";
   },
-  message: { error: 'Rate limit exceeded for paid requests' },
+  message: { error: "Rate limit exceeded for paid requests" },
 });
 
 // Apply global rate limiter to all /v1/ routes
-app.use('/v1/', globalLimiter);
+app.use("/v1/", globalLimiter);
 
 /**
  * Middleware: Check authentication and x402 payment
@@ -343,13 +407,13 @@ app.use('/v1/', globalLimiter);
  * 2. X-PAYMENT header present → decode, verify via facilitator, run handler, settle
  */
 async function authMiddleware(req: Request, res: Response, next: NextFunction) {
-  const origin = req.get('origin') || req.get('referer') || '';
-  const clientIp = req.ip || req.socket.remoteAddress || '';
-  const apiKey = req.get('X-API-Key') || req.query.api_key;
+  const origin = req.get("origin") || req.get("referer") || "";
+  const clientIp = req.ip || req.socket.remoteAddress || "";
+  const apiKey = req.get("X-API-Key") || req.query.api_key;
 
   // 1. Check whitelist (free access for Mystery Gift apps)
   // Extract hostname from origin (e.g., "https://api.mysterygift.fun" -> "api.mysterygift.fun")
-  let originHost = '';
+  let originHost = "";
   try {
     if (origin) {
       originHost = new URL(origin).hostname;
@@ -365,9 +429,9 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
       return true;
     }
     // Wildcard subdomain matching: *.domain.com matches any.domain.com
-    if (entry.startsWith('*.')) {
+    if (entry.startsWith("*.")) {
       const baseDomain = entry.slice(2); // Remove "*."
-      return originHost === baseDomain || originHost.endsWith('.' + baseDomain);
+      return originHost === baseDomain || originHost.endsWith("." + baseDomain);
     }
     // Exact hostname match only
     return originHost === entry;
@@ -375,25 +439,25 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
 
   if (isWhitelisted) {
     usageStats.whitelistedRequests++;
-    (req as any).paymentStatus = 'whitelisted';
+    (req as any).paymentStatus = "whitelisted";
     return next();
   }
 
   // 2. Check API key (free access for authorized partners)
   if (apiKey && API_KEYS.includes(apiKey as string)) {
-    (req as any).paymentStatus = 'api_key';
+    (req as any).paymentStatus = "api_key";
     return next();
   }
 
   // 3. Check x402 X-PAYMENT header
-  const paymentHeader = req.get('X-Payment');
+  const paymentHeader = req.get("X-Payment");
 
   if (!paymentHeader) {
     // Return standard 402 with PaymentRequirements
     const accepts = Object.values(paymentRequirementsByNetwork);
     res.status(402).json({
       x402Version: 1,
-      error: 'X-PAYMENT header is required',
+      error: "X-PAYMENT header is required",
       accepts,
     });
     return;
@@ -406,19 +470,24 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
     if (!paymentPayload) {
       res.status(402).json({
         x402Version: 1,
-        error: 'Invalid X-PAYMENT header format',
+        error: "Invalid X-PAYMENT header format",
         accepts: Object.values(paymentRequirementsByNetwork),
       });
       return;
     }
 
     // Replay protection: hash the payload
-    const payloadHash = crypto.createHash('sha256').update(paymentHeader).digest('hex');
+    const payloadHash = crypto
+      .createHash("sha256")
+      .update(paymentHeader)
+      .digest("hex");
     if (await hasPayloadHash(payloadHash)) {
-      console.warn(`[TEE] Replay attempt detected: ${payloadHash.slice(0, 16)}`);
+      console.warn(
+        `[TEE] Replay attempt detected: ${payloadHash.slice(0, 16)}`,
+      );
       res.status(402).json({
         x402Version: 1,
-        error: 'Payment payload already used (replay detected)',
+        error: "Payment payload already used (replay detected)",
       });
       return;
     }
@@ -444,16 +513,18 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
       console.warn(`[TEE] Payment invalid: ${verification.invalidReason}`);
       res.status(402).json({
         x402Version: 1,
-        error: 'Payment verification failed',
+        error: "Payment verification failed",
         reason: verification.invalidReason,
       });
       return;
     }
 
-    console.log(`[TEE] Payment verified from ${verification.payer} on ${paymentPayload.network}`);
+    console.log(
+      `[TEE] Payment verified from ${verification.payer} on ${paymentPayload.network}`,
+    );
 
     // Store payment context for post-handler settlement
-    (req as any).paymentStatus = 'paid';
+    (req as any).paymentStatus = "paid";
     (req as any).x402PaymentPayload = paymentPayload;
     (req as any).x402PaymentRequirements = requirements;
     (req as any).x402Payer = verification.payer;
@@ -465,31 +536,39 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
     const originalJson = res.json.bind(res);
     res.json = function (body: any) {
       // Settle payment in background (don't block the response)
-      x402Server.settle(paymentPayload, requirements).then((settlement) => {
-        if (settlement.success) {
-          console.log(`[TEE] Payment settled: tx=${settlement.transaction}`);
-        } else {
-          console.error(`[TEE] Settlement failed: ${settlement.errorReason}`);
-        }
-      }).catch((err) => {
-        console.error(`[TEE] Settlement error:`, err);
-      });
+      x402Server
+        .settle(paymentPayload, requirements)
+        .then((settlement) => {
+          if (settlement.success) {
+            console.log(`[TEE] Payment settled: tx=${settlement.transaction}`);
+          } else {
+            console.error(`[TEE] Settlement failed: ${settlement.errorReason}`);
+          }
+        })
+        .catch((err) => {
+          console.error(`[TEE] Settlement error:`, err);
+        });
 
       // Add X-PAYMENT-RESPONSE header with settlement info
-      res.set('X-PAYMENT-RESPONSE', Buffer.from(JSON.stringify({
-        x402Version: 1,
-        scheme: paymentPayload.scheme,
-        network: paymentPayload.network,
-        payer: verification.payer,
-      })).toString('base64'));
+      res.set(
+        "X-PAYMENT-RESPONSE",
+        Buffer.from(
+          JSON.stringify({
+            x402Version: 1,
+            scheme: paymentPayload.scheme,
+            network: paymentPayload.network,
+            payer: verification.payer,
+          }),
+        ).toString("base64"),
+      );
 
       return originalJson(body);
     } as any;
 
     next();
   } catch (error) {
-    console.error('[TEE] Payment verification error:', error);
-    res.status(500).json({ error: 'Payment verification failed' });
+    console.error("[TEE] Payment verification error:", error);
+    res.status(500).json({ error: "Payment verification failed" });
   }
 }
 
@@ -497,439 +576,535 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
  * POST /v1/randomness
  * Returns raw 256-bit random seed with attestation
  */
-app.post('/v1/randomness', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
-  try {
-    const { request_hash, metadata } = req.body;
+app.post(
+  "/v1/randomness",
+  paidLimiter,
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const { request_hash, metadata } = req.body;
 
-    usageStats.totalRequests++;
+      usageStats.totalRequests++;
 
-    console.log(`[TEE] Randomness request:`, {
-      payment: (req as any).paymentStatus,
-      metadata,
-      total: usageStats.totalRequests,
-    });
+      console.log(`[TEE] Randomness request:`, {
+        payment: (req as any).paymentStatus,
+        metadata,
+        total: usageStats.totalRequests,
+      });
 
-    // 1. Generate Secure Random Seed
-    const randomBytes = crypto.randomBytes(32);
-    const seed = randomBytes.toString('hex');
+      // 1. Generate Secure Random Seed
+      const randomBytes = crypto.randomBytes(32);
+      const seed = randomBytes.toString("hex");
 
-    // 2. Generate Remote Attestation (The "Proof")
-    const attestation = await generateAttestation(seed, request_hash);
+      // 2. Generate Remote Attestation (The "Proof")
+      const attestation = await generateAttestation(seed, request_hash);
 
-    // 3. Run commitment operations (non-blocking)
-    const commitment = await runCommitments(
-      seed,
-      request_hash || '',
-      attestation,
-      '/v1/randomness',
-      metadata
-    );
+      // 3. Run commitment operations (non-blocking)
+      const commitment = await runCommitments(
+        seed,
+        request_hash || "",
+        attestation,
+        "/v1/randomness",
+        metadata,
+      );
 
-    // 4. Return the result
-    res.json({
-      random_seed: seed,
-      attestation: attestation,
-      timestamp: Date.now(),
-      tee_type: TEE_TYPE,
-      app_id: TEE_INFO.app_id,
-      ...(commitment && { commitment }),
-    });
-  } catch (error) {
-    console.error('[TEE] Error generating randomness:', error);
-    res.status(500).json({ error: 'Internal TEE Error' });
-  }
-});
+      // 4. Return the result
+      res.json({
+        random_seed: seed,
+        attestation: attestation,
+        timestamp: Date.now(),
+        tee_type: TEE_TYPE,
+        app_id: TEE_INFO.app_id,
+        ...(commitment && { commitment }),
+      });
+    } catch (error) {
+      console.error("[TEE] Error generating randomness:", error);
+      res.status(500).json({ error: "Internal TEE Error" });
+    }
+  },
+);
 
 /**
  * POST /v1/random/number
  * Returns a random integer between min and max (inclusive)
  * Body: { min?: number, max: number, request_hash?: string }
  */
-app.post('/v1/random/number', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
-  try {
-    const { min = 1, max, request_hash } = req.body;
+app.post(
+  "/v1/random/number",
+  paidLimiter,
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const { min = 1, max, request_hash } = req.body;
 
-    if (typeof max !== 'number' || max < 1) {
-      res.status(400).json({ error: 'max is required and must be a positive number' });
-      return;
+      if (typeof max !== "number" || max < 1) {
+        res
+          .status(400)
+          .json({ error: "max is required and must be a positive number" });
+        return;
+      }
+
+      if (min >= max) {
+        res.status(400).json({ error: "min must be less than max" });
+        return;
+      }
+
+      usageStats.totalRequests++;
+
+      // Generate random bytes
+      const randomBytes = crypto.randomBytes(32);
+      const seed = randomBytes.toString("hex");
+
+      // Convert to number in range [min, max]
+      const bigInt = BigInt("0x" + seed.slice(0, 16)); // Use 64 bits
+      const range = BigInt(max - min + 1);
+      const randomNumber = Number(bigInt % range) + min;
+
+      const rHash = request_hash || `number:${min}-${max}`;
+      const attestation = await generateAttestation(seed, rHash);
+
+      const commitment = await runCommitments(
+        seed,
+        rHash,
+        attestation,
+        "/v1/random/number",
+        {
+          min,
+          max,
+        },
+      );
+
+      res.json({
+        number: randomNumber,
+        min,
+        max,
+        random_seed: seed,
+        attestation,
+        timestamp: Date.now(),
+        tee_type: TEE_TYPE,
+        ...(commitment && { commitment }),
+      });
+    } catch (error) {
+      console.error("[TEE] Error generating random number:", error);
+      res.status(500).json({ error: "Internal TEE Error" });
     }
-
-    if (min >= max) {
-      res.status(400).json({ error: 'min must be less than max' });
-      return;
-    }
-
-    usageStats.totalRequests++;
-
-    // Generate random bytes
-    const randomBytes = crypto.randomBytes(32);
-    const seed = randomBytes.toString('hex');
-
-    // Convert to number in range [min, max]
-    const bigInt = BigInt('0x' + seed.slice(0, 16)); // Use 64 bits
-    const range = BigInt(max - min + 1);
-    const randomNumber = Number(bigInt % range) + min;
-
-    const rHash = request_hash || `number:${min}-${max}`;
-    const attestation = await generateAttestation(seed, rHash);
-
-    const commitment = await runCommitments(seed, rHash, attestation, '/v1/random/number', {
-      min,
-      max,
-    });
-
-    res.json({
-      number: randomNumber,
-      min,
-      max,
-      random_seed: seed,
-      attestation,
-      timestamp: Date.now(),
-      tee_type: TEE_TYPE,
-      ...(commitment && { commitment }),
-    });
-  } catch (error) {
-    console.error('[TEE] Error generating random number:', error);
-    res.status(500).json({ error: 'Internal TEE Error' });
-  }
-});
+  },
+);
 
 /**
  * POST /v1/random/pick
  * Picks one random item from a provided list
  * Body: { items: any[], request_hash?: string }
  */
-app.post('/v1/random/pick', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
-  try {
-    const { items, request_hash } = req.body;
+app.post(
+  "/v1/random/pick",
+  paidLimiter,
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const { items, request_hash } = req.body;
 
-    if (!Array.isArray(items) || items.length === 0) {
-      res.status(400).json({ error: 'items must be a non-empty array' });
-      return;
+      if (!Array.isArray(items) || items.length === 0) {
+        res.status(400).json({ error: "items must be a non-empty array" });
+        return;
+      }
+
+      if (items.length > 100000) {
+        res
+          .status(400)
+          .json({ error: "items array cannot exceed 100,000 elements" });
+        return;
+      }
+
+      usageStats.totalRequests++;
+
+      const randomBytes = crypto.randomBytes(32);
+      const seed = randomBytes.toString("hex");
+
+      // Pick random index
+      const bigInt = BigInt("0x" + seed.slice(0, 16));
+      const index = Number(bigInt % BigInt(items.length));
+      const picked = items[index];
+
+      const rHash = request_hash || `pick:${items.length}`;
+      const attestation = await generateAttestation(seed, rHash);
+
+      const commitment = await runCommitments(
+        seed,
+        rHash,
+        attestation,
+        "/v1/random/pick",
+        {
+          total_items: items.length,
+        },
+      );
+
+      res.json({
+        picked,
+        index,
+        total_items: items.length,
+        random_seed: seed,
+        attestation,
+        timestamp: Date.now(),
+        tee_type: TEE_TYPE,
+        ...(commitment && { commitment }),
+      });
+    } catch (error) {
+      console.error("[TEE] Error picking random item:", error);
+      res.status(500).json({ error: "Internal TEE Error" });
     }
-
-    if (items.length > 100000) {
-      res.status(400).json({ error: 'items array cannot exceed 100,000 elements' });
-      return;
-    }
-
-    usageStats.totalRequests++;
-
-    const randomBytes = crypto.randomBytes(32);
-    const seed = randomBytes.toString('hex');
-
-    // Pick random index
-    const bigInt = BigInt('0x' + seed.slice(0, 16));
-    const index = Number(bigInt % BigInt(items.length));
-    const picked = items[index];
-
-    const rHash = request_hash || `pick:${items.length}`;
-    const attestation = await generateAttestation(seed, rHash);
-
-    const commitment = await runCommitments(seed, rHash, attestation, '/v1/random/pick', {
-      total_items: items.length,
-    });
-
-    res.json({
-      picked,
-      index,
-      total_items: items.length,
-      random_seed: seed,
-      attestation,
-      timestamp: Date.now(),
-      tee_type: TEE_TYPE,
-      ...(commitment && { commitment }),
-    });
-  } catch (error) {
-    console.error('[TEE] Error picking random item:', error);
-    res.status(500).json({ error: 'Internal TEE Error' });
-  }
-});
+  },
+);
 
 /**
  * POST /v1/random/shuffle
  * Shuffles a list using Fisher-Yates algorithm with TEE randomness
  * Body: { items: any[], request_hash?: string }
  */
-app.post('/v1/random/shuffle', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
-  try {
-    const { items, request_hash } = req.body;
+app.post(
+  "/v1/random/shuffle",
+  paidLimiter,
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const { items, request_hash } = req.body;
 
-    if (!Array.isArray(items) || items.length === 0) {
-      res.status(400).json({ error: 'items must be a non-empty array' });
-      return;
+      if (!Array.isArray(items) || items.length === 0) {
+        res.status(400).json({ error: "items must be a non-empty array" });
+        return;
+      }
+
+      if (items.length > 1000) {
+        res
+          .status(400)
+          .json({
+            error: "items array cannot exceed 1,000 elements for shuffle",
+          });
+        return;
+      }
+
+      usageStats.totalRequests++;
+
+      // Generate enough random bytes for the shuffle
+      const bytesNeeded = Math.ceil(items.length * 4); // 4 bytes per swap decision
+      const randomBytes = crypto.randomBytes(Math.max(32, bytesNeeded));
+      const seed = randomBytes.slice(0, 32).toString("hex");
+
+      // Fisher-Yates shuffle using TEE randomness
+      const shuffled = [...items];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        // Use 4 bytes for each random choice
+        const offset = (shuffled.length - 1 - i) * 4;
+        const randomValue = randomBytes.readUInt32BE(
+          offset % randomBytes.length,
+        );
+        const j = randomValue % (i + 1);
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+
+      const rHash = request_hash || `shuffle:${items.length}`;
+      const attestation = await generateAttestation(seed, rHash);
+
+      const commitment = await runCommitments(
+        seed,
+        rHash,
+        attestation,
+        "/v1/random/shuffle",
+        {
+          original_count: items.length,
+        },
+      );
+
+      res.json({
+        shuffled,
+        original_count: items.length,
+        random_seed: seed,
+        attestation,
+        timestamp: Date.now(),
+        tee_type: TEE_TYPE,
+        ...(commitment && { commitment }),
+      });
+    } catch (error) {
+      console.error("[TEE] Error shuffling items:", error);
+      res.status(500).json({ error: "Internal TEE Error" });
     }
-
-    if (items.length > 1000) {
-      res.status(400).json({ error: 'items array cannot exceed 1,000 elements for shuffle' });
-      return;
-    }
-
-    usageStats.totalRequests++;
-
-    // Generate enough random bytes for the shuffle
-    const bytesNeeded = Math.ceil(items.length * 4); // 4 bytes per swap decision
-    const randomBytes = crypto.randomBytes(Math.max(32, bytesNeeded));
-    const seed = randomBytes.slice(0, 32).toString('hex');
-
-    // Fisher-Yates shuffle using TEE randomness
-    const shuffled = [...items];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      // Use 4 bytes for each random choice
-      const offset = (shuffled.length - 1 - i) * 4;
-      const randomValue = randomBytes.readUInt32BE(offset % randomBytes.length);
-      const j = randomValue % (i + 1);
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-
-    const rHash = request_hash || `shuffle:${items.length}`;
-    const attestation = await generateAttestation(seed, rHash);
-
-    const commitment = await runCommitments(seed, rHash, attestation, '/v1/random/shuffle', {
-      original_count: items.length,
-    });
-
-    res.json({
-      shuffled,
-      original_count: items.length,
-      random_seed: seed,
-      attestation,
-      timestamp: Date.now(),
-      tee_type: TEE_TYPE,
-      ...(commitment && { commitment }),
-    });
-  } catch (error) {
-    console.error('[TEE] Error shuffling items:', error);
-    res.status(500).json({ error: 'Internal TEE Error' });
-  }
-});
+  },
+);
 
 /**
  * POST /v1/random/winners
  * Pick multiple unique winners from a list
  * Body: { items: any[], count: number, request_hash?: string }
  */
-app.post('/v1/random/winners', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
-  try {
-    const { items, count = 1, request_hash } = req.body;
+app.post(
+  "/v1/random/winners",
+  paidLimiter,
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const { items, count = 1, request_hash } = req.body;
 
-    if (!Array.isArray(items) || items.length === 0) {
-      res.status(400).json({ error: 'items must be a non-empty array' });
-      return;
-    }
+      if (!Array.isArray(items) || items.length === 0) {
+        res.status(400).json({ error: "items must be a non-empty array" });
+        return;
+      }
 
-    if (typeof count !== 'number' || count < 1) {
-      res.status(400).json({ error: 'count must be a positive number' });
-      return;
-    }
+      if (typeof count !== "number" || count < 1) {
+        res.status(400).json({ error: "count must be a positive number" });
+        return;
+      }
 
-    if (count > items.length) {
-      res.status(400).json({ error: 'count cannot exceed the number of items' });
-      return;
-    }
+      if (count > items.length) {
+        res
+          .status(400)
+          .json({ error: "count cannot exceed the number of items" });
+        return;
+      }
 
-    if (items.length > 100000) {
-      res.status(400).json({ error: 'items array cannot exceed 100,000 elements' });
-      return;
-    }
+      if (items.length > 100000) {
+        res
+          .status(400)
+          .json({ error: "items array cannot exceed 100,000 elements" });
+        return;
+      }
 
-    usageStats.totalRequests++;
+      usageStats.totalRequests++;
 
-    // Generate enough randomness for selecting winners
-    const bytesNeeded = Math.ceil(count * 4); // 4 bytes per selection
-    const randomBytes = crypto.randomBytes(Math.max(32, bytesNeeded));
-    const seed = randomBytes.slice(0, 32).toString('hex');
+      // Generate enough randomness for selecting winners
+      const bytesNeeded = Math.ceil(count * 4); // 4 bytes per selection
+      const randomBytes = crypto.randomBytes(Math.max(32, bytesNeeded));
+      const seed = randomBytes.slice(0, 32).toString("hex");
 
-    // Use Fisher-Yates partial shuffle for deterministic, collision-free selection
-    // This is more efficient and reliable than reservoir sampling
-    const itemsCopy = [...items];
-    const winners: any[] = [];
+      // Use Fisher-Yates partial shuffle for deterministic, collision-free selection
+      // This is more efficient and reliable than reservoir sampling
+      const itemsCopy = [...items];
+      const winners: any[] = [];
 
-    for (let i = 0; i < count; i++) {
-      // Use 4 bytes for each random selection
-      const offset = i * 4;
-      const randomValue = randomBytes.readUInt32BE(offset % randomBytes.length);
+      for (let i = 0; i < count; i++) {
+        // Use 4 bytes for each random selection
+        const offset = i * 4;
+        const randomValue = randomBytes.readUInt32BE(
+          offset % randomBytes.length,
+        );
 
-      // Select random index from remaining items
-      const j = i + (randomValue % (itemsCopy.length - i));
+        // Select random index from remaining items
+        const j = i + (randomValue % (itemsCopy.length - i));
 
-      // Swap selected item to position i
-      [itemsCopy[i], itemsCopy[j]] = [itemsCopy[j], itemsCopy[i]];
+        // Swap selected item to position i
+        [itemsCopy[i], itemsCopy[j]] = [itemsCopy[j], itemsCopy[i]];
 
-      // Add to winners with metadata
-      winners.push({
-        item: itemsCopy[i],
-        index: items.indexOf(itemsCopy[i]),
-        position: i + 1,
+        // Add to winners with metadata
+        winners.push({
+          item: itemsCopy[i],
+          index: items.indexOf(itemsCopy[i]),
+          position: i + 1,
+        });
+      }
+
+      const rHash = request_hash || `winners:${count}of${items.length}`;
+      const attestation = await generateAttestation(seed, rHash);
+
+      const commitment = await runCommitments(
+        seed,
+        rHash,
+        attestation,
+        "/v1/random/winners",
+        {
+          count: winners.length,
+          total_items: items.length,
+        },
+      );
+
+      res.json({
+        winners,
+        count: winners.length,
+        total_items: items.length,
+        random_seed: seed,
+        attestation,
+        timestamp: Date.now(),
+        tee_type: TEE_TYPE,
+        ...(commitment && { commitment }),
       });
+    } catch (error) {
+      console.error("[TEE] Error selecting winners:", error);
+      res.status(500).json({ error: "Internal TEE Error" });
     }
-
-    const rHash = request_hash || `winners:${count}of${items.length}`;
-    const attestation = await generateAttestation(seed, rHash);
-
-    const commitment = await runCommitments(seed, rHash, attestation, '/v1/random/winners', {
-      count: winners.length,
-      total_items: items.length,
-    });
-
-    res.json({
-      winners,
-      count: winners.length,
-      total_items: items.length,
-      random_seed: seed,
-      attestation,
-      timestamp: Date.now(),
-      tee_type: TEE_TYPE,
-      ...(commitment && { commitment }),
-    });
-  } catch (error) {
-    console.error('[TEE] Error selecting winners:', error);
-    res.status(500).json({ error: 'Internal TEE Error' });
-  }
-});
+  },
+);
 
 /**
  * POST /v1/random/uuid
  * Generates a cryptographically secure UUIDv4
  * Body: { request_hash?: string }
  */
-app.post('/v1/random/uuid', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
-  try {
-    const { request_hash } = req.body;
+app.post(
+  "/v1/random/uuid",
+  paidLimiter,
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const { request_hash } = req.body;
 
-    usageStats.totalRequests++;
+      usageStats.totalRequests++;
 
-    const randomBytes = crypto.randomBytes(32);
-    const seed = randomBytes.toString('hex');
+      const randomBytes = crypto.randomBytes(32);
+      const seed = randomBytes.toString("hex");
 
-    // Generate UUIDv4 from random bytes
-    const uuidBytes = randomBytes.slice(0, 16);
-    uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40; // Version 4
-    uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80; // Variant 1
+      // Generate UUIDv4 from random bytes
+      const uuidBytes = randomBytes.slice(0, 16);
+      uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40; // Version 4
+      uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80; // Variant 1
 
-    const uuid = [
-      uuidBytes.slice(0, 4).toString('hex'),
-      uuidBytes.slice(4, 6).toString('hex'),
-      uuidBytes.slice(6, 8).toString('hex'),
-      uuidBytes.slice(8, 10).toString('hex'),
-      uuidBytes.slice(10, 16).toString('hex'),
-    ].join('-');
+      const uuid = [
+        uuidBytes.slice(0, 4).toString("hex"),
+        uuidBytes.slice(4, 6).toString("hex"),
+        uuidBytes.slice(6, 8).toString("hex"),
+        uuidBytes.slice(8, 10).toString("hex"),
+        uuidBytes.slice(10, 16).toString("hex"),
+      ].join("-");
 
-    const rHash = request_hash || `uuid`;
-    const attestation = await generateAttestation(seed, rHash);
+      const rHash = request_hash || `uuid`;
+      const attestation = await generateAttestation(seed, rHash);
 
-    const commitment = await runCommitments(seed, rHash, attestation, '/v1/random/uuid');
+      const commitment = await runCommitments(
+        seed,
+        rHash,
+        attestation,
+        "/v1/random/uuid",
+      );
 
-    res.json({
-      uuid,
-      random_seed: seed,
-      attestation,
-      timestamp: Date.now(),
-      tee_type: TEE_TYPE,
-      ...(commitment && { commitment }),
-    });
-  } catch (error) {
-    console.error('[TEE] Error generating UUID:', error);
-    res.status(500).json({ error: 'Internal TEE Error' });
-  }
-});
+      res.json({
+        uuid,
+        random_seed: seed,
+        attestation,
+        timestamp: Date.now(),
+        tee_type: TEE_TYPE,
+        ...(commitment && { commitment }),
+      });
+    } catch (error) {
+      console.error("[TEE] Error generating UUID:", error);
+      res.status(500).json({ error: "Internal TEE Error" });
+    }
+  },
+);
 
 /**
  * POST /v1/random/dice
  * Roll dice (e.g., 2d6, 1d20)
  * Body: { dice: string (e.g., "2d6"), request_hash?: string }
  */
-app.post('/v1/random/dice', paidLimiter, authMiddleware, async (req: Request, res: Response) => {
-  try {
-    const { dice, request_hash } = req.body;
+app.post(
+  "/v1/random/dice",
+  paidLimiter,
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const { dice, request_hash } = req.body;
 
-    if (typeof dice !== 'string') {
-      res.status(400).json({ error: 'dice must be a string (e.g., "2d6", "1d20")' });
-      return;
+      if (typeof dice !== "string") {
+        res
+          .status(400)
+          .json({ error: 'dice must be a string (e.g., "2d6", "1d20")' });
+        return;
+      }
+
+      const match = dice.toLowerCase().match(/^(\d+)d(\d+)$/);
+      if (!match) {
+        res
+          .status(400)
+          .json({
+            error: 'Invalid dice format. Use "NdM" (e.g., "2d6", "1d20")',
+          });
+        return;
+      }
+
+      const numDice = parseInt(match[1], 10);
+      const sides = parseInt(match[2], 10);
+
+      if (numDice < 1 || numDice > 100) {
+        res
+          .status(400)
+          .json({ error: "Number of dice must be between 1 and 100" });
+        return;
+      }
+
+      if (sides < 2 || sides > 1000) {
+        res
+          .status(400)
+          .json({ error: "Dice sides must be between 2 and 1000" });
+        return;
+      }
+
+      usageStats.totalRequests++;
+
+      const randomBytes = crypto.randomBytes(Math.max(32, numDice * 4));
+      const seed = randomBytes.slice(0, 32).toString("hex");
+
+      const rolls: number[] = [];
+      for (let i = 0; i < numDice; i++) {
+        const value = randomBytes.readUInt32BE((i * 4) % randomBytes.length);
+        rolls.push((value % sides) + 1);
+      }
+
+      const total = rolls.reduce((a, b) => a + b, 0);
+      const rHash = request_hash || `dice:${dice}`;
+      const attestation = await generateAttestation(seed, rHash);
+
+      const commitment = await runCommitments(
+        seed,
+        rHash,
+        attestation,
+        "/v1/random/dice",
+        {
+          dice,
+          num_dice: numDice,
+          sides,
+        },
+      );
+
+      res.json({
+        dice,
+        rolls,
+        total,
+        min_possible: numDice,
+        max_possible: numDice * sides,
+        random_seed: seed,
+        attestation,
+        timestamp: Date.now(),
+        tee_type: TEE_TYPE,
+        ...(commitment && { commitment }),
+      });
+    } catch (error) {
+      console.error("[TEE] Error rolling dice:", error);
+      res.status(500).json({ error: "Internal TEE Error" });
     }
-
-    const match = dice.toLowerCase().match(/^(\d+)d(\d+)$/);
-    if (!match) {
-      res.status(400).json({ error: 'Invalid dice format. Use "NdM" (e.g., "2d6", "1d20")' });
-      return;
-    }
-
-    const numDice = parseInt(match[1], 10);
-    const sides = parseInt(match[2], 10);
-
-    if (numDice < 1 || numDice > 100) {
-      res.status(400).json({ error: 'Number of dice must be between 1 and 100' });
-      return;
-    }
-
-    if (sides < 2 || sides > 1000) {
-      res.status(400).json({ error: 'Dice sides must be between 2 and 1000' });
-      return;
-    }
-
-    usageStats.totalRequests++;
-
-    const randomBytes = crypto.randomBytes(Math.max(32, numDice * 4));
-    const seed = randomBytes.slice(0, 32).toString('hex');
-
-    const rolls: number[] = [];
-    for (let i = 0; i < numDice; i++) {
-      const value = randomBytes.readUInt32BE((i * 4) % randomBytes.length);
-      rolls.push((value % sides) + 1);
-    }
-
-    const total = rolls.reduce((a, b) => a + b, 0);
-    const rHash = request_hash || `dice:${dice}`;
-    const attestation = await generateAttestation(seed, rHash);
-
-    const commitment = await runCommitments(seed, rHash, attestation, '/v1/random/dice', {
-      dice,
-      num_dice: numDice,
-      sides,
-    });
-
-    res.json({
-      dice,
-      rolls,
-      total,
-      min_possible: numDice,
-      max_possible: numDice * sides,
-      random_seed: seed,
-      attestation,
-      timestamp: Date.now(),
-      tee_type: TEE_TYPE,
-      ...(commitment && { commitment }),
-    });
-  } catch (error) {
-    console.error('[TEE] Error rolling dice:', error);
-    res.status(500).json({ error: 'Internal TEE Error' });
-  }
-});
+  },
+);
 
 /**
  * GET /v1/health
  */
-app.get('/v1/health', (_req: Request, res: Response) => {
+app.get("/v1/health", (_req: Request, res: Response) => {
   res.json({
-    status: 'ok',
-    service: 'verifiable-randomness-service',
+    status: "ok",
+    service: "verifiable-randomness-service",
     tee_type: TEE_TYPE,
     version: VERSION,
-    environment: process.env.APP_ENVIRONMENT || 'development',
+    environment: process.env.APP_ENVIRONMENT || "development",
     timestamp: new Date().toISOString(),
     x402_enabled: true,
     price_per_request: `$${(PRICE_PER_REQUEST_CENTS / 100).toFixed(2)}`,
     app_id: TEE_INFO.app_id,
-    verification_available: TEE_TYPE === 'tdx',
+    verification_available: TEE_TYPE === "tdx",
     arweave_enabled: ARWEAVE_ENABLED,
     endpoints: [
-      'POST /v1/randomness - Raw 256-bit seed',
-      'POST /v1/random/number - Random number in range',
-      'POST /v1/random/pick - Pick one from list',
-      'POST /v1/random/shuffle - Shuffle a list',
-      'POST /v1/random/winners - Pick multiple winners',
-      'POST /v1/random/uuid - Generate UUIDv4',
-      'POST /v1/random/dice - Roll dice (e.g., 2d6)',
+      "POST /v1/randomness - Raw 256-bit seed",
+      "POST /v1/random/number - Random number in range",
+      "POST /v1/random/pick - Pick one from list",
+      "POST /v1/random/shuffle - Shuffle a list",
+      "POST /v1/random/winners - Pick multiple winners",
+      "POST /v1/random/uuid - Generate UUIDv4",
+      "POST /v1/random/dice - Roll dice (e.g., 2d6)",
     ],
   });
 });
@@ -937,11 +1112,11 @@ app.get('/v1/health', (_req: Request, res: Response) => {
 /**
  * GET /v1/stats
  */
-app.get('/v1/stats', (req: Request, res: Response) => {
-  const apiKey = req.get('X-API-Key') || req.query.api_key;
+app.get("/v1/stats", (req: Request, res: Response) => {
+  const apiKey = req.get("X-API-Key") || req.query.api_key;
 
   if (!apiKey || !API_KEYS.includes(apiKey as string)) {
-    res.status(401).json({ error: 'Unauthorized' });
+    res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
@@ -955,10 +1130,10 @@ app.get('/v1/stats', (req: Request, res: Response) => {
 /**
  * GET / - Landing page
  */
-app.get('/', (_req: Request, res: Response) => {
+app.get("/", (_req: Request, res: Response) => {
   const appId = TEE_INFO.app_id;
-  const composeHash = TEE_INFO.compose_hash || 'Loading...';
-  const cluster = process.env.PHALA_CLUSTER || 'prod9';
+  const composeHash = TEE_INFO.compose_hash || "Loading...";
+  const cluster = process.env.PHALA_CLUSTER || "prod9";
   const nodeUrl = `https://${appId}-8090.dstack-pha-${cluster}.phala.network/`;
 
   const html = renderLandingPage({
@@ -971,17 +1146,17 @@ app.get('/', (_req: Request, res: Response) => {
     appId,
     composeHash,
     nodeUrl,
-    environment: process.env.APP_ENVIRONMENT || 'development',
+    environment: process.env.APP_ENVIRONMENT || "development",
   });
 
-  res.type('html').send(html);
+  res.type("html").send(html);
 });
 
 /**
  * GET /v1/attestation - Public verification data
  * Returns attestation info for independent verification
  */
-app.get('/v1/attestation', async (_req: Request, res: Response) => {
+app.get("/v1/attestation", async (_req: Request, res: Response) => {
   try {
     const dstack = getDstackClient();
 
@@ -989,18 +1164,21 @@ app.get('/v1/attestation', async (_req: Request, res: Response) => {
       res.json({
         tee_type: TEE_TYPE,
         verified: false,
-        error: 'TEE hardware not available (simulation mode)',
+        error: "TEE hardware not available (simulation mode)",
         verification_url: null,
       });
       return;
     }
 
     // Get fresh attestation quote for verification
-    const reportData = crypto.createHash('sha256').update('attestation-request').digest();
+    const reportData = crypto
+      .createHash("sha256")
+      .update("attestation-request")
+      .digest();
     const quote = await dstack.getQuote(reportData);
 
     if (!quote || !quote.quote) {
-      res.status(500).json({ error: 'Failed to generate attestation' });
+      res.status(500).json({ error: "Failed to generate attestation" });
       return;
     }
 
@@ -1012,15 +1190,15 @@ app.get('/v1/attestation', async (_req: Request, res: Response) => {
       try {
         const events = JSON.parse(quote.event_log);
         for (const event of events) {
-          if (event.event === 'compose-hash') {
+          if (event.event === "compose-hash") {
             composeHash = event.event_payload;
             TEE_INFO.compose_hash = composeHash;
           }
-          if (event.event === 'instance-id') {
+          if (event.event === "instance-id") {
             instanceId = event.event_payload;
             TEE_INFO.instance_id = instanceId;
           }
-          if (event.event === 'app-id') {
+          if (event.event === "app-id") {
             TEE_INFO.app_id = event.event_payload;
           }
         }
@@ -1038,18 +1216,20 @@ app.get('/v1/attestation', async (_req: Request, res: Response) => {
       quote_hex: quote.quote,
       event_log: quote.event_log,
       verification: {
-        phala_cloud_api: 'https://cloud-api.phala.network/api/v1/attestations/verify',
+        phala_cloud_api:
+          "https://cloud-api.phala.network/api/v1/attestations/verify",
         phala_dashboard: `https://cloud.phala.network/dashboard/cvms/${TEE_INFO.app_id}`,
-        instructions: 'POST the quote_hex to the verification API to verify this attestation',
+        instructions:
+          "POST the quote_hex to the verification API to verify this attestation",
       },
       source_code: {
-        repository: 'https://github.com/mysterygift/mystery-gift',
-        path: 'tee-worker/',
+        repository: "https://github.com/mysterygift/mystery-gift",
+        path: "tee-worker/",
       },
     });
   } catch (error) {
-    console.error('[TEE] Attestation info error:', error);
-    res.status(500).json({ error: 'Failed to get attestation info' });
+    console.error("[TEE] Attestation info error:", error);
+    res.status(500).json({ error: "Failed to get attestation info" });
   }
 });
 
@@ -1057,7 +1237,7 @@ app.get('/v1/attestation', async (_req: Request, res: Response) => {
  * POST /v1/verify - Verify an attestation quote
  * Uses Phala Cloud's centralized verification API
  */
-app.post('/v1/verify', async (req: Request, res: Response) => {
+app.post("/v1/verify", async (req: Request, res: Response) => {
   try {
     const { attestation, quote_hex } = req.body;
 
@@ -1066,18 +1246,20 @@ app.post('/v1/verify', async (req: Request, res: Response) => {
     // Accept either base64-encoded attestation or raw hex quote
     if (attestation) {
       try {
-        const decoded = JSON.parse(Buffer.from(attestation, 'base64').toString());
-        if (decoded.type === 'mock-tee-attestation') {
+        const decoded = JSON.parse(
+          Buffer.from(attestation, "base64").toString(),
+        );
+        if (decoded.type === "mock-tee-attestation") {
           res.json({
             valid: false,
-            error: 'Mock attestation cannot be verified',
-            tee_type: 'simulation',
+            error: "Mock attestation cannot be verified",
+            tee_type: "simulation",
           });
           return;
         }
         quoteToVerify = decoded.quote;
       } catch {
-        res.status(400).json({ error: 'Invalid attestation format' });
+        res.status(400).json({ error: "Invalid attestation format" });
         return;
       }
     } else if (quote_hex) {
@@ -1085,21 +1267,23 @@ app.post('/v1/verify', async (req: Request, res: Response) => {
     }
 
     if (!quoteToVerify) {
-      res.status(400).json({ error: 'Missing attestation or quote_hex parameter' });
+      res
+        .status(400)
+        .json({ error: "Missing attestation or quote_hex parameter" });
       return;
     }
 
     // Call Phala Cloud's verification API
     const verifyResponse = await fetch(
-      'https://cloud-api.phala.network/api/v1/attestations/verify',
+      "https://cloud-api.phala.network/api/v1/attestations/verify",
       {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hex: quoteToVerify }),
         // Break request if it takes too long (5s timeout)
         // @ts-ignore - AbortSignal.timeout is available in Node 18+ but might not be in types
         signal: (AbortSignal as any).timeout(5000),
-      }
+      },
     );
 
     if (!verifyResponse.ok) {
@@ -1116,12 +1300,12 @@ app.post('/v1/verify', async (req: Request, res: Response) => {
     res.json({
       valid: result.quote?.verified === true,
       verification_result: result,
-      verified_by: 'Phala Cloud Attestation API',
+      verified_by: "Phala Cloud Attestation API",
       verified_at: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('[TEE] Verification error:', error);
-    res.status(500).json({ error: 'Verification failed' });
+    console.error("[TEE] Verification error:", error);
+    res.status(500).json({ error: "Verification failed" });
   }
 });
 
@@ -1274,38 +1458,38 @@ function renderStaticPage(title: string, content: string): string {
 /**
  * GET /changelog - Changelog Page
  */
-app.get('/changelog', (_req: Request, res: Response) => {
-  const changelogPath = path.join(__dirname, '../CHANGELOG.md');
-  let md = '';
+app.get("/changelog", (_req: Request, res: Response) => {
+  const changelogPath = path.join(__dirname, "../CHANGELOG.md");
+  let md = "";
   try {
-    md = fs.readFileSync(changelogPath, 'utf-8');
+    md = fs.readFileSync(changelogPath, "utf-8");
   } catch (e) {
-    md = 'Changelog not found.';
+    md = "Changelog not found.";
   }
 
   let sections: string[] = [];
-  let currentSection = '';
-  let preamble = '';
+  let currentSection = "";
+  let preamble = "";
   let inVersion = false;
   let inList = false;
-  const lines = md.split('\n');
+  const lines = md.split("\n");
 
   for (const line of lines) {
     let l = line.trim();
 
     // Header Detection
-    if (l.startsWith('## ')) {
+    if (l.startsWith("## ")) {
       // New Version Block
       if (inVersion) {
         if (inList) {
-          currentSection += '</ul>\n';
+          currentSection += "</ul>\n";
           inList = false;
         }
         sections.push(currentSection);
       } else {
         // End of preamble
         if (inList) {
-          preamble += '</ul>\n';
+          preamble += "</ul>\n";
           inList = false;
         }
       }
@@ -1313,37 +1497,40 @@ app.get('/changelog', (_req: Request, res: Response) => {
       currentSection = `<h2>${l.slice(3)}</h2>`;
     }
     // Main Title (Skip or add to preamble)
-    else if (l.startsWith('# ')) {
+    else if (l.startsWith("# ")) {
       // Title usually "Changelog", we ignore it or add to preamble
       continue;
     }
     // Content Parsing
     else {
-      let htmlLine = '';
+      let htmlLine = "";
       if (!l) {
         if (inList) {
-          htmlLine = '</ul>\n';
+          htmlLine = "</ul>\n";
           inList = false;
         }
-      } else if (l.startsWith('### ')) {
+      } else if (l.startsWith("### ")) {
         if (inList) {
-          htmlLine += '</ul>\n';
+          htmlLine += "</ul>\n";
           inList = false;
         }
         htmlLine += `<h3>${l.slice(4)}</h3>`;
-      } else if (l.startsWith('- ')) {
+      } else if (l.startsWith("- ")) {
         if (!inList) {
-          htmlLine += '<ul>\n';
+          htmlLine += "<ul>\n";
           inList = true;
         }
         let text = l.slice(2);
-        text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        text = text.replace(/`([^`]*)`/g, '<code>$1</code>');
-        text = text.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>');
+        text = text.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+        text = text.replace(/`([^`]*)`/g, "<code>$1</code>");
+        text = text.replace(
+          /\[(.*?)\]\((.*?)\)/g,
+          '<a href="$2" target="_blank">$1</a>',
+        );
         htmlLine += `<li>${text}</li>`;
       } else {
         if (inList) {
-          htmlLine += '</ul>\n';
+          htmlLine += "</ul>\n";
           inList = false;
         }
         htmlLine += `<p>${l}</p>`;
@@ -1356,23 +1543,23 @@ app.get('/changelog', (_req: Request, res: Response) => {
 
   // Push last section
   if (inList) {
-    if (inVersion) currentSection += '</ul>\n';
-    else preamble += '</ul>\n';
+    if (inVersion) currentSection += "</ul>\n";
+    else preamble += "</ul>\n";
   }
   if (inVersion) sections.push(currentSection);
 
   // Reverse Order (Oldest First)
   sections.reverse();
 
-  let content = preamble + sections.join('\n');
+  let content = preamble + sections.join("\n");
 
-  res.type('html').send(renderStaticPage('Changelog', content));
+  res.type("html").send(renderStaticPage("Changelog", content));
 });
 
 /**
  * GET /terms - Terms of Service
  */
-app.get('/terms', (_req: Request, res: Response) => {
+app.get("/terms", (_req: Request, res: Response) => {
   const content = `
     <h1>Terms of Service</h1>
     <div class="subtitle">Last Updated: January 2026</div>
@@ -1423,13 +1610,13 @@ app.get('/terms', (_req: Request, res: Response) => {
     <p>For questions about these Terms, contact us on <a href="https://x.com/mysterygift_fun" target="_blank">X</a>.</p>
   `;
 
-  res.type('html').send(renderStaticPage('Terms of Service', content));
+  res.type("html").send(renderStaticPage("Terms of Service", content));
 });
 
 /**
  * GET /privacy - Privacy Policy
  */
-app.get('/privacy', (_req: Request, res: Response) => {
+app.get("/privacy", (_req: Request, res: Response) => {
   const content = `
     <h1>Privacy Policy</h1>
     <div class="subtitle">Last Updated: January 2026</div>
@@ -1494,24 +1681,27 @@ app.get('/privacy', (_req: Request, res: Response) => {
     <p>For privacy-related inquiries, contact us on <a href="https://x.com/mysterygift_fun" target="_blank">X</a>.</p>
   `;
 
-  res.type('html').send(renderStaticPage('Privacy Policy', content));
+  res.type("html").send(renderStaticPage("Privacy Policy", content));
 });
 
 /**
  * Helper to interact with TEE hardware for attestation via dStack SDK
  */
-async function generateAttestation(seed: string, requestHash: string): Promise<string> {
+async function generateAttestation(
+  seed: string,
+  requestHash: string,
+): Promise<string> {
   // Combine seed and request hash to prevent replay attacks
   const reportData = crypto
-    .createHash('sha256')
+    .createHash("sha256")
     .update(seed)
-    .update(requestHash || '')
+    .update(requestHash || "")
     .digest();
 
   try {
     // Use dStack SDK to get quote
     const dstack = getDstackClient();
-    if (!dstack) throw new Error('dStack client not initialized');
+    if (!dstack) throw new Error("dStack client not initialized");
 
     // Pass the raw Buffer (32 bytes) directly to the SDK
     // The SDK handles sending this as the report_data for the quote
@@ -1522,46 +1712,51 @@ async function generateAttestation(seed: string, requestHash: string): Promise<s
       // and provide additional verification data (event log, etc.)
       return Buffer.from(
         JSON.stringify({
-          type: 'tdx-attestation',
+          type: "tdx-attestation",
           quote: quote.quote,
           event_log: quote.event_log,
-          algorithm: 'sha256',
-          provider: 'phala-dstack',
-        })
-      ).toString('base64');
+          algorithm: "sha256",
+          provider: "phala-dstack",
+        }),
+      ).toString("base64");
     } else {
-      throw new Error('Invalid quote response from SDK');
+      throw new Error("Invalid quote response from SDK");
     }
   } catch (error) {
-    console.warn('[TEE] Attestation failed, falling back to simulation:', error);
+    console.warn(
+      "[TEE] Attestation failed, falling back to simulation:",
+      error,
+    );
 
     // In production, refuse to serve mock attestations
-    if (process.env.NODE_ENV === 'production') {
-      console.error('[TEE] CRITICAL: TEE attestation failed in production — refusing to serve mock');
-      throw new Error('TEE attestation unavailable in production');
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[TEE] CRITICAL: TEE attestation failed in production — refusing to serve mock",
+      );
+      throw new Error("TEE attestation unavailable in production");
     }
 
     // Fallback for development/simulation mode only
     return Buffer.from(
       JSON.stringify({
-        type: 'mock-tee-attestation',
-        report_data: reportData.toString('hex'),
+        type: "mock-tee-attestation",
+        report_data: reportData.toString("hex"),
         timestamp: Date.now(),
-        warning: 'No TEE hardware detected - simulation mode',
-      })
-    ).toString('base64');
+        warning: "No TEE hardware detected - simulation mode",
+      }),
+    ).toString("base64");
   }
 }
 
 // Start server
 async function start() {
   // Global error handler for uncaught exceptions
-  process.on('uncaughtException', (err) => {
-    console.error('[TEE] Uncaught Exception:', err);
+  process.on("uncaughtException", (err) => {
+    console.error("[TEE] Uncaught Exception:", err);
   });
 
-  process.on('unhandledRejection', (reason, promise) => {
-    console.error('[TEE] Unhandled Rejection at:', promise, 'reason:', reason);
+  process.on("unhandledRejection", (reason, promise) => {
+    console.error("[TEE] Unhandled Rejection at:", promise, "reason:", reason);
   });
 
   // Try to detect TEE type via SDK info
@@ -1571,13 +1766,13 @@ async function start() {
       // SDK doesn't have explicit "detect" but getting info should work
       const info = await dstack.info().catch(() => null);
       if (info) {
-        TEE_TYPE = 'tdx';
-        console.log('[TEE] dStack detected, running in TDX mode');
+        TEE_TYPE = "tdx";
+        console.log("[TEE] dStack detected, running in TDX mode");
       } else {
-        console.log('[TEE] dStack not detected, running in simulation mode');
+        console.log("[TEE] dStack not detected, running in simulation mode");
       }
     } catch (e) {
-      console.log('[TEE] Error checking dStack status:', e);
+      console.log("[TEE] Error checking dStack status:", e);
     }
   }
 
@@ -1585,41 +1780,49 @@ async function start() {
   if (ARWEAVE_ENABLED) {
     const kp = await getCommitmentKeypair();
     if (kp) {
-      console.log(`[TEE] Arweave proofs enabled, key: ${kp.publicKey.toBase58()}`);
+      console.log(
+        `[TEE] Arweave proofs enabled, key: ${kp.publicKey.toBase58()}`,
+      );
     } else {
-      console.warn('[TEE] Arweave proofs enabled but keypair derivation failed');
+      console.warn(
+        "[TEE] Arweave proofs enabled but keypair derivation failed",
+      );
     }
   } else {
-    console.log('[TEE] Arweave proofs disabled via ARWEAVE_ENABLED=false');
+    console.log("[TEE] Arweave proofs disabled via ARWEAVE_ENABLED=false");
   }
 
   // CRITICAL: Warn loudly if running in simulation mode in production
-  if (TEE_TYPE === 'simulation' && process.env.NODE_ENV === 'production') {
-    console.error('='.repeat(80));
-    console.error('[TEE] CRITICAL WARNING: Running in SIMULATION mode in PRODUCTION');
-    console.error('[TEE] Attestations will be REFUSED. TEE hardware is required for production.');
-    console.error('='.repeat(80));
+  if (TEE_TYPE === "simulation" && process.env.NODE_ENV === "production") {
+    console.error("=".repeat(80));
+    console.error(
+      "[TEE] CRITICAL WARNING: Running in SIMULATION mode in PRODUCTION",
+    );
+    console.error(
+      "[TEE] Attestations will be REFUSED. TEE hardware is required for production.",
+    );
+    console.error("=".repeat(80));
   }
 
   // Serve static files
-  app.use('/assets', express.static(path.join(__dirname, '../static')));
+  app.use("/assets", express.static(path.join(__dirname, "../static")));
 
-  const server = app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`[TEE] Randomness Worker v2.8 running on port ${PORT}`);
     console.log(`[TEE] Environment: ${TEE_TYPE.toUpperCase()}`);
   });
 
   // Graceful shutdown
   const shutdown = () => {
-    console.log('[TEE] Shutting down...');
+    console.log("[TEE] Shutting down...");
     server.close(() => {
-      console.log('[TEE] Server closed');
+      console.log("[TEE] Server closed");
       process.exit(0);
     });
   };
 
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 start();

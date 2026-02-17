@@ -29,6 +29,10 @@ RUN npm run build
 # Remove dev dependencies
 RUN npm prune --production && npm install /app/.x402-pkg
 
+# Create non-root user and set permissions
+RUN useradd -m -s /bin/bash appuser && chown -R appuser:appuser /app
+USER appuser
+
 ENV PORT=3000
 EXPOSE 3000
 
