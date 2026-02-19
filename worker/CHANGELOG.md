@@ -1,24 +1,38 @@
 # Changelog
 
-All notable changes to the Verified Randomness Service.
+All notable changes to the Verifiable Randomness Service.
 
-## [0.1.0-BETA] - 2026-01-21
+## [0.1.0-BETA] - 2026-02-18
 
-### Initial Release
+### Initial Production Release
 
-**Security Features:**
+**Multichain Support:**
 
-- x402 payment protocol with facilitator-based verification ($0.01 per request)
-- Multichain support (Solana, Base) via PayAI facilitator
-- Replay attack prevention via LRU payment ID cache
-- Rate limiting (100/min global, 20/min paid endpoints)
-- Strict CORS policy for production
+- Solana mainnet and devnet support
+- Base (EVM) mainnet support with MetaMask integration
+- Separate payment wallets per chain (Solana: 3Qudd5FG..., Base: 0x2d55...)
+- USDC payments via x402 protocol on both chains
 
-**TEE Integration:**
+**RPC & Infrastructure:**
 
-- Intel TDX hardware-backed randomness generation
-- Remote attestation via Phala dStack SDK
-- Simulation mode for local development
+- Helius RPC integration (primary) for Solana
+- Fallback to public RPCs if Helius unavailable
+- Redis-based replay protection for payment verification
+
+**Frontend UI:**
+
+- Landing page with network selector (Solana/Base)
+- Wallet connection (Phantom/Solflare for Solana, MetaMask for Base)
+- Real-time transaction signing and payment flow
+- Attestation verification display
+
+**Security:**
+
+- Rate limiting (100/min global, 20/min paid)
+- Whitelist support for free API access
+- API key authentication for partners
+- x402 payment verification via PayAI facilitator
+- Arweave commitment proofs for verification
 
 **API Endpoints:**
 
@@ -33,20 +47,14 @@ All notable changes to the Verified Randomness Service.
 - `GET /v1/health` - Health check
 - `POST /v1/verify` - Verify attestation quote
 
+**TEE Integration:**
+
+- Intel TDX hardware-backed randomness generation
+- Remote attestation via Phala dStack SDK
+- Simulation mode for local development
+
 **Monitoring:**
 
-- GlitchTip/Sentry integration for error tracking
-- Health check endpoint with detailed status
 - Comprehensive logging
-
-**Authentication:**
-
-- Whitelist support (free access for allowed origins)
-- API key support (partner access)
-- x402 payment protocol (Solana, Base via PayAI facilitator)
-
-**Deployment:**
-
-- Docker support with non-root user
-- Phala Cloud compatible
-- Cloudflare Workers landing page
+- Health check endpoint with detailed status
+- Arweave commitment storage for audit trails

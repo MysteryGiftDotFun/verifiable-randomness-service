@@ -10,6 +10,7 @@ export interface LandingConfig {
   teeType: string;
   paymentWallet: string;
   paymentWalletBase?: string;
+  heliusRpcUrl?: string;
   facilitatorUrl: string;
   supportedNetworks: string[];
   arweaveEnabled: boolean;
@@ -27,6 +28,7 @@ export function renderLandingPage(config: LandingConfig): string {
     nodeUrl,
     paymentWallet,
     paymentWalletBase,
+    heliusRpcUrl,
     facilitatorUrl,
     supportedNetworks,
     arweaveEnabled,
@@ -41,6 +43,7 @@ export function renderLandingPage(config: LandingConfig): string {
   const hasBase = supportedNetworks.includes("base");
   const solanaWallet = paymentWallet;
   const baseWallet = paymentWalletBase || paymentWallet;
+  const heliusRpc = heliusRpcUrl || "";
 
   return `
 <!DOCTYPE html>
@@ -630,9 +633,12 @@ export function renderLandingPage(config: LandingConfig): string {
       </div>
 
       <a href="/changelog" class="version-tag" style="text-decoration:none; cursor:pointer;">
-        v${version} &bull; ${composeHash.slice(0, 8)}
+        v${version} &bull; <span id="version-hash">${composeHash.slice(0, 8)}</span>
         <span class="env-badge ${envBadgeClass}">${envBadgeText}</span>
       </a>
+      <div style="font-size:0.65rem; color:var(--text-muted); opacity:0.6; margin-top:0.25rem;">
+        BETA SOFTWARE — Use at your own risk
+      </div>
     </div>
 
     <!-- Panel -->
@@ -808,7 +814,7 @@ if (expected === arweaveProof.commitment_hash) {
               <div style="font-size:1.2rem; font-weight:700; color:var(--text-main);">$0.01 <span style="font-size:0.8rem; color:var(--text-muted);">/ req</span></div>
             </div>
             <div style="margin-top:0.8rem; font-size:0.8rem; color:var(--text-muted);">
-              Pay via x402 (${supportedNetworks.join(" / ").toUpperCase()}) &bull; 90% cheaper than Switchboard VRF
+              Pay via x402 (SOLANA / BASE) &bull; 90% cheaper than Chainlink and Switchboard VRF
             </div>
           </div>
 
@@ -933,9 +939,6 @@ if (expected === arweaveProof.commitment_hash) {
       </div>
 
       <div class="legal-footer">
-        <div style="margin-bottom:0.5rem; padding:0.5rem; background:rgba(255,149,0,0.1); border-radius:6px; font-size:0.7rem;">
-          <strong style="color:#FF9500;">BETA SOFTWARE</strong> — Use at your own risk. This is experimental software.
-        </div>
         &copy; 2026 MYSTERY GIFT &bull; <a href="/terms" style="color:var(--text-muted)">Terms</a> &bull; <a href="/privacy" style="color:var(--text-muted)">Privacy</a> &bull; <a href="https://x.com/mysterygift_fun" target="_blank" style="color:var(--text-muted)">X</a>
       </div>
     </div>
@@ -945,6 +948,7 @@ if (expected === arweaveProof.commitment_hash) {
     // Config
     const PAYMENT_WALLET = '${paymentWallet}';
     const PAYMENT_WALLET_BASE = '${baseWallet}';
+    const HELIUS_RPC_URL = '${heliusRpc}';
     const FACILITATOR_URL = '${facilitatorUrl}';
     const SUPPORTED_NETWORKS = ${networksJson};
     const HAS_BASE = ${hasBase ? "true" : "false"};
@@ -964,6 +968,19 @@ if (expected === arweaveProof.commitment_hash) {
     });
 
     document.addEventListener('DOMContentLoaded', () => {
+      // Fetch real compose hash from attestation endpoint
+      fetch('/v1/attestation')
+        .then(r => r.json())
+        .then(data => {
+          if (data?.compose_hash) {
+            const hashEl = document.getElementById('version-hash');
+            if (hashEl) hashEl.textContent = data.compose_hash.slice(0, 8);
+            const composeHashEl = document.getElementById('compose-hash');
+            if (composeHashEl) composeHashEl.textContent = data.compose_hash;
+          }
+        })
+        .catch(() => {});
+
       document.querySelectorAll('.dropdown-option').forEach(opt => {
         opt.addEventListener('click', (e) => {
           const dropdown = e.target.closest('.custom-dropdown');
@@ -1043,16 +1060,38 @@ if (expected === arweaveProof.commitment_hash) {
         document.getElementById('gen-btn').disabled = true;
         log('Wallet disconnected');
       } else {
-        if (!window.solana) return log('No Solana wallet found. Install Phantom or Solflare.', 'error');
-        try {
-          try { await window.solana.disconnect(); } catch(e) {}
-          const r = await window.solana.connect();
-          wallet = r.publicKey.toString();
-          document.getElementById('connect-btn').innerText = wallet.slice(0,4)+'..'+wallet.slice(-4);
-          document.getElementById('connect-btn').classList.add('connected');
-          document.getElementById('gen-btn').disabled = false;
-          log('Connected: '+wallet, 'success');
-        } catch(e) { log(e.message || 'Connection rejected', 'error'); }
+        // Check which network is selected and connect accordingly
+        if (selectedNetwork === 'solana') {
+          if (!window.solana) return log('No Solana wallet found. Install Phantom or Solflare.', 'error');
+          try {
+            try { await window.solana.disconnect(); } catch(e) {}
+            const r = await window.solana.connect();
+            wallet = r.publicKey.toString();
+            document.getElementById('connect-btn').innerText = wallet.slice(0,4)+'..'+wallet.slice(-4);
+            document.getElementById('connect-btn').classList.add('connected');
+            document.getElementById('gen-btn').disabled = false;
+            log('Connected: '+wallet, 'success');
+          } catch(e) { log(e.message || 'Connection rejected', 'error'); }
+        } else if (selectedNetwork === 'base') {
+          // Connect Base wallet (MetaMask or other EVM wallets)
+          let ethProvider = window.ethereum;
+          
+          // Try to request accounts to trigger wallet
+          try {
+            const accounts = await window.ethereum?.request({ method: 'eth_requestAccounts' });
+            if (accounts && accounts.length > 0) {
+              wallet = accounts[0];
+              document.getElementById('connect-btn').innerText = wallet.slice(0,4)+'..'+wallet.slice(-4);
+              document.getElementById('connect-btn').classList.add('connected');
+              document.getElementById('gen-btn').disabled = false;
+              log('Connected: '+wallet, 'success');
+            }
+          } catch(e) { 
+            log('No EVM wallet found. Install MetaMask.', 'error'); 
+          }
+        } else {
+          log('Unsupported network: ' + selectedNetwork, 'error');
+        }
       }
     }
 
@@ -1164,9 +1203,8 @@ if (expected === arweaveProof.commitment_hash) {
         if (selectedNetwork === 'solana') {
           const { Connection, PublicKey, Transaction, TransactionInstruction } = solanaWeb3;
 
-          // Try multiple RPC endpoints for reliability
-          // Primary: Helius (paid, reliable), Fallback: Public RPC (rate-limited)
-          const RPC_ENDPOINTS = [
+          // Helius RPC (primary) - configured from server
+          const RPC_ENDPOINTS = HELIUS_RPC_URL ? [HELIUS_RPC_URL] : [
             'https://api.mainnet-beta.solana.com'
           ];
 
@@ -1209,10 +1247,8 @@ if (expected === arweaveProof.commitment_hash) {
             }
             log('USDC balance verified: $' + (userBalance / 1e6).toFixed(2));
           } catch (e) {
-            if (e.message && e.message.includes('could not find account')) {
-              throw new Error('No USDC found in your wallet. Please add at least $0.01 USDC to continue.');
-            }
-            throw e;
+            if (e.message.includes('Insufficient')) throw e;
+            log('Note: Could not verify USDC balance (token account may be new): ' + e.message, 'warn');
           }
 
           // Compute Budget Program ID
@@ -1227,7 +1263,7 @@ if (expected === arweaveProof.commitment_hash) {
             return new TransactionInstruction({
               keys: [],
               programId: COMPUTE_BUDGET_PROGRAM_ID,
-              data,
+              data: data,
             });
           }
 
@@ -1235,20 +1271,15 @@ if (expected === arweaveProof.commitment_hash) {
             const data = new Uint8Array(9);
             data[0] = 3; // SetComputeUnitPrice instruction
             const view = new DataView(data.buffer);
-            // microLamports is u64, write as two u32s (little-endian)
-            view.setUint32(1, microLamports & 0xFFFFFFFF, true);
-            view.setUint32(5, Math.floor(microLamports / 0x100000000), true);
+            view.setUint32(1, microLamports, true); // little-endian
             return new TransactionInstruction({
               keys: [],
               programId: COMPUTE_BUDGET_PROGRAM_ID,
-              data,
+              data: data,
             });
           }
 
-          // x402 facilitator requires EXACTLY 3 instructions in this order:
-          // 1. setComputeUnitLimit
-          // 2. setComputeUnitPrice
-          // 3. transferChecked (not regular transfer)
+          // Build transaction with compute budget instructions
           const instructions = [
             createSetComputeUnitLimitInstruction(50000),
             createSetComputeUnitPriceInstruction(1000),
@@ -1306,15 +1337,168 @@ if (expected === arweaveProof.commitment_hash) {
           const data = await res.json();
           if (data.error) throw new Error(data.error);
 
-          receiptData.result = {
-            random_seed: data.random_seed,
-            tee_type: data.tee_type,
-            attestation: data.attestation,
-          };
-
+          // Store the result data from paid request
+          receiptData.result = { random_seed: data.random_seed, tee_type: data.tee_type, attestation: data.attestation };
           if (data.number !== undefined) receiptData.result.value = data.number;
           if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
           if (data.picked !== undefined) receiptData.result.value = data.picked;
+
+          // Store commitment (Arweave proof) data
+          if (data.commitment) {
+            receiptData.commitment = {
+              hash: data.commitment.commitment_hash,
+              arweave_tx: data.commitment.arweave_tx,
+              arweave_url: data.commitment.arweave_url,
+            };
+          }
+
+        } else if (selectedNetwork === 'base') {
+          // Base/EVM payment using WalletConnect or injected provider
+          log('Connecting to Base network...');
+
+          const baseRpcUrl = 'https://base-mainnet.g.alchemy.com/v2/demo'; // Use demo for now
+          const usdcAddress = requirements.asset; // 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+          const toAddress = requirements.payTo;
+          const amount = BigInt(requirements.maxAmountRequired);
+
+          // Check for ethereum provider (MetaMask, WalletConnect, etc.)
+          let ethProvider = window.ethereum;
+          
+          // Try to get provider from WalletConnect or other injected providers
+          if (!ethProvider) {
+            // Check for WalletConnect or other injected providers
+            if (window.walletConnectProvider) {
+              ethProvider = window.walletConnectProvider;
+            } else if (window.coinbaseWallet) {
+              ethProvider = window.coinbaseWallet;
+            }
+          }
+
+          if (!ethProvider) {
+            // Try to request accounts to trigger MetaMask
+            try {
+              const accounts = await window.ethereum?.request({ method: 'eth_requestAccounts' });
+              if (accounts && accounts.length > 0) {
+                ethProvider = window.ethereum;
+              }
+            } catch (e) {}
+          }
+
+          if (!ethProvider) {
+            throw new Error('No Ethereum wallet found. Please install MetaMask or use a WalletConnect-compatible wallet.');
+          }
+
+          // Request account access
+          const accounts = await ethProvider.request({ method: 'eth_requestAccounts' });
+          const fromAddress = accounts[0];
+
+          log('Wallet connected: ' + fromAddress.slice(0, 6) + '...' + fromAddress.slice(-4));
+
+          // Build USDC transfer data
+          // USDC on Base has 6 decimals, amount is already in base units
+          const amountHex = '0x' + amount.toString(16);
+
+          // USDC transfer function selector (transfer(address,uint256))
+          const transferFn = '0xa9059cbb';
+          const toAddressPadded = toAddress.slice(2).padStart(64, '0');
+          const amountPadded = amount.toString(16).padStart(64, '0');
+          const txData = transferFn + toAddressPadded + amountPadded;
+
+          // Build transaction
+          const tx = {
+            from: fromAddress,
+            to: usdcAddress,
+            data: txData,
+            value: '0x0',
+          };
+
+          // Get gas estimate
+          try {
+            const gasEstimate = await ethProvider.request({
+              method: 'eth_estimateGas',
+              params: [tx],
+            });
+            tx.gas = gasEstimate;
+          } catch (e) {
+            log('Using default gas limit', 'warn');
+            tx.gas = '0x' + (21000).toString(16);
+          }
+
+          // Get chain ID
+          const chainId = await ethProvider.request({ method: 'eth_chainId' });
+
+          // Get nonce
+          const nonce = await ethProvider.request({
+            method: 'eth_getTransactionCount',
+            params: [fromAddress, 'latest'],
+          });
+
+          tx.nonce = nonce;
+          tx.chainId = chainId;
+
+          // Get gas price
+          const gasPrice = await ethProvider.request({ method: 'eth_gasPrice' });
+          tx.gasPrice = gasPrice;
+
+          log('Please approve the transaction in your wallet...');
+
+          // Sign and send transaction
+          const txHash = await ethProvider.request({
+            method: 'eth_sendTransaction',
+            params: [tx],
+          });
+
+          log('Transaction submitted, waiting for confirmation...');
+
+          // Wait for transaction receipt
+          let receipt = null;
+          for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            receipt = await ethProvider.request({
+              method: 'eth_getTransactionReceipt',
+              params: [txHash],
+            });
+            if (receipt) break;
+          }
+
+          if (!receipt || receipt.status === '0x0') {
+            throw new Error('Transaction failed');
+          }
+
+          log('Transaction confirmed!');
+
+          // Build X-PAYMENT header with transaction hash
+          const paymentPayload = {
+            x402Version: 1,
+            scheme: requirements.scheme || 'exact',
+            network: 'base',
+            payload: { transactionHash: txHash },
+          };
+
+          const xPaymentHeader = btoa(JSON.stringify(paymentPayload));
+          log('Sending payment...');
+
+          // Send request with X-PAYMENT header
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Payment': xPaymentHeader,
+            },
+            body: JSON.stringify(body),
+          });
+
+          // Get settlement info from response header
+          const paymentResponse = res.headers.get('X-PAYMENT-RESPONSE');
+          if (paymentResponse) {
+            try {
+              const settlement = JSON.parse(atob(paymentResponse));
+              receiptData.payment.settlement = settlement;
+            } catch(e) {}
+          }
+
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
 
           // Store commitment (Arweave proof) data
           if (data.commitment) {

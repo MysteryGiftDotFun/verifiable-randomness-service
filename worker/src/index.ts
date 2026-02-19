@@ -1135,12 +1135,14 @@ app.get("/", (_req: Request, res: Response) => {
   const composeHash = TEE_INFO.compose_hash || "Loading...";
   const cluster = process.env.PHALA_CLUSTER || "prod9";
   const nodeUrl = `https://${appId}-8090.dstack-pha-${cluster}.phala.network/`;
+  const heliusRpcUrl = process.env.HELIUS_RPC_URL || "";
 
   const html = renderLandingPage({
     version: VERSION,
     teeType: TEE_TYPE,
     paymentWallet: PAYMENT_WALLET,
     paymentWalletBase: PAYMENT_WALLET_BASE,
+    heliusRpcUrl,
     facilitatorUrl: X402_FACILITATOR_URL,
     supportedNetworks: SUPPORTED_NETWORKS,
     arweaveEnabled: ARWEAVE_ENABLED,
