@@ -9,6 +9,7 @@ export interface LandingConfig {
   version: string;
   teeType: string;
   paymentWallet: string;
+  paymentWalletBase?: string;
   facilitatorUrl: string;
   supportedNetworks: string[];
   arweaveEnabled: boolean;
@@ -25,6 +26,7 @@ export function renderLandingPage(config: LandingConfig): string {
     composeHash,
     nodeUrl,
     paymentWallet,
+    paymentWalletBase,
     facilitatorUrl,
     supportedNetworks,
     arweaveEnabled,
@@ -35,6 +37,10 @@ export function renderLandingPage(config: LandingConfig): string {
     environment === "production" ? "production" : "development";
   const envBadgeText = environment === "production" ? "PROD" : "DEV";
   const networksJson = JSON.stringify(supportedNetworks);
+
+  const hasBase = supportedNetworks.includes("base");
+  const solanaWallet = paymentWallet;
+  const baseWallet = paymentWalletBase || paymentWallet;
 
   return `
 <!DOCTYPE html>
@@ -938,8 +944,10 @@ if (expected === arweaveProof.commitment_hash) {
   <script>
     // Config
     const PAYMENT_WALLET = '${paymentWallet}';
+    const PAYMENT_WALLET_BASE = '${baseWallet}';
     const FACILITATOR_URL = '${facilitatorUrl}';
     const SUPPORTED_NETWORKS = ${networksJson};
+    const HAS_BASE = ${hasBase ? "true" : "false"};
 
     // State
     let selectedNetwork = SUPPORTED_NETWORKS[0] || 'solana';

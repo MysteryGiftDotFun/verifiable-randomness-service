@@ -7,20 +7,20 @@ services:
       - redis-data:/data
     restart: always
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
 
   # Production service (mainnet)
   randomness-prod:
-    image: phantasybot/verifiable-randomness-service:v0.3.22-BETA
+    image: phantasybot/verifiable-randomness-service:v0.1.0-BETA
     ports:
-      - '3000:3000'
+      - "3000:3000"
     environment:
       - PORT=3000
       - NODE_ENV=production
-      - APP_VERSION=0.3.22-BETA
+      - APP_VERSION=0.1.0-BETA
       - APP_ENVIRONMENT=production
       - PHALA_APP_ID=4379c582b5c9cf28473de17932e9d62b4eb15995
       - PAYMENT_WALLET=${PAYMENT_WALLET:-3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx}
@@ -39,7 +39,7 @@ services:
         condition: service_healthy
     restart: always
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:3000/v1/health']
+      test: ["CMD", "curl", "-f", "http://localhost:3000/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -47,13 +47,13 @@ services:
 
   # Development service (devnet)
   randomness-dev:
-    image: phantasybot/verifiable-randomness-service:v0.3.22-BETA
+    image: phantasybot/verifiable-randomness-service:v0.1.0-BETA
     ports:
-      - '3001:3001'
+      - "3001:3001"
     environment:
       - PORT=3001
       - NODE_ENV=development
-      - APP_VERSION=0.3.22-BETA
+      - APP_VERSION=0.1.0-BETA
       - APP_ENVIRONMENT=development
       - PHALA_APP_ID=${PHALA_APP_ID_DEV:-}
       - PAYMENT_WALLET=${PAYMENT_WALLET_DEV:-}
@@ -72,7 +72,7 @@ services:
         condition: service_healthy
     restart: always
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:3001/v1/health']
+      test: ["CMD", "curl", "-f", "http://localhost:3001/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3

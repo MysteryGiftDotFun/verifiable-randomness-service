@@ -63,6 +63,8 @@ const PAYMENT_WALLET = (() => {
   return wallet;
 })();
 
+const PAYMENT_WALLET_BASE = process.env.PAYMENT_WALLET_BASE || PAYMENT_WALLET;
+
 // Load version from package.json
 const packageJson = JSON.parse(
   fs.readFileSync(path.join(__dirname, "../package.json"), "utf-8"),
@@ -96,11 +98,13 @@ const SOLANA_FEE_PAYER = "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4";
 // Build PaymentRequirements for each supported network
 const paymentRequirementsByNetwork: Record<string, PaymentRequirements> = {};
 for (const network of SUPPORTED_NETWORKS) {
+  const paymentWallet =
+    network === "base" ? PAYMENT_WALLET_BASE : PAYMENT_WALLET;
   paymentRequirementsByNetwork[network] = X402Server.buildPaymentRequirements({
     network,
     maxAmountRequired: PRICE_BASE_UNITS,
     asset: USDC_ASSETS[network] || USDC_ASSETS.solana,
-    payTo: PAYMENT_WALLET,
+    payTo: paymentWallet,
     resource: `https://rng.mysterygift.fun/v1/randomness`,
     description: "TEE Randomness Request",
     maxTimeoutSeconds: 60,
@@ -775,11 +779,9 @@ app.post(
       }
 
       if (items.length > 1000) {
-        res
-          .status(400)
-          .json({
-            error: "items array cannot exceed 1,000 elements for shuffle",
-          });
+        res.status(400).json({
+          error: "items array cannot exceed 1,000 elements for shuffle",
+        });
         return;
       }
 
@@ -1010,11 +1012,9 @@ app.post(
 
       const match = dice.toLowerCase().match(/^(\d+)d(\d+)$/);
       if (!match) {
-        res
-          .status(400)
-          .json({
-            error: 'Invalid dice format. Use "NdM" (e.g., "2d6", "1d20")',
-          });
+        res.status(400).json({
+          error: 'Invalid dice format. Use "NdM" (e.g., "2d6", "1d20")',
+        });
         return;
       }
 
@@ -1140,6 +1140,7 @@ app.get("/", (_req: Request, res: Response) => {
     version: VERSION,
     teeType: TEE_TYPE,
     paymentWallet: PAYMENT_WALLET,
+    paymentWalletBase: PAYMENT_WALLET_BASE,
     facilitatorUrl: X402_FACILITATOR_URL,
     supportedNetworks: SUPPORTED_NETWORKS,
     arweaveEnabled: ARWEAVE_ENABLED,
