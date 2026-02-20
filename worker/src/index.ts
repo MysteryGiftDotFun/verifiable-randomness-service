@@ -29,7 +29,7 @@ app.use(
       process.env.NODE_ENV === "production"
         ? [
             "https://mysterygift.fun",
-            "https://rng.mysterygift.fun",
+            "https://vrf.mysterygift.fun",
             /\.mysterygift\.fun$/,
           ]
         : [
@@ -105,7 +105,7 @@ for (const network of SUPPORTED_NETWORKS) {
     maxAmountRequired: PRICE_BASE_UNITS,
     asset: USDC_ASSETS[network] || USDC_ASSETS.solana,
     payTo: paymentWallet,
-    resource: `https://rng.mysterygift.fun/v1/randomness`,
+    resource: `https://vrf.mysterygift.fun/v1/randomness`,
     description: "TEE Randomness Request",
     maxTimeoutSeconds: 60,
     // Include facilitator's fee payer for Solana networks
@@ -1136,6 +1136,7 @@ app.get("/", (_req: Request, res: Response) => {
   const cluster = process.env.PHALA_CLUSTER || "prod9";
   const nodeUrl = `https://${appId}-8090.dstack-pha-${cluster}.phala.network/`;
   const heliusRpcUrl = process.env.HELIUS_RPC_URL || "";
+  const baseRpcUrl = process.env.BASE_RPC_URL || "";
 
   const html = renderLandingPage({
     version: VERSION,
@@ -1143,6 +1144,7 @@ app.get("/", (_req: Request, res: Response) => {
     paymentWallet: PAYMENT_WALLET,
     paymentWalletBase: PAYMENT_WALLET_BASE,
     heliusRpcUrl,
+    baseRpcUrl,
     facilitatorUrl: X402_FACILITATOR_URL,
     supportedNetworks: SUPPORTED_NETWORKS,
     arweaveEnabled: ARWEAVE_ENABLED,

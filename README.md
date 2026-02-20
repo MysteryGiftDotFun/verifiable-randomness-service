@@ -6,7 +6,7 @@ TEE-powered verifiable randomness for the [Mystery Gift](https://mysterygift.fun
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    rng.mysterygift.fun                          │
+│                    vrf.mysterygift.fun                          │
 │                  (Cloudflare Workers - Landing Page)            │
 ├─────────────────────────────────────────────────────────────────┤
 │  Landing Page UI    │    API Proxy (/v1/*)                      │
@@ -51,7 +51,7 @@ TEE-powered verifiable randomness for the [Mystery Gift](https://mysterygift.fun
 **Allowed origins** (production only):
 
 - `https://mysterygift.fun`
-- `https://rng.mysterygift.fun`
+- `https://vrf.mysterygift.fun`
 - `*.mysterygift.fun` (all subdomains)
 
 **Development**: All origins allowed (`NODE_ENV=development`)
@@ -172,7 +172,7 @@ The service uses **x402** with facilitator-based verification. Payments are chai
 1. **Create a payment intent**:
 
    ```bash
-   curl -X POST https://rng.mysterygift.fun/v1/payment/create \
+   curl -X POST https://vrf.mysterygift.fun/v1/payment/create \
      -H "Content-Type: application/json" \
      -d '{"network": "solana"}'
    ```
@@ -184,7 +184,7 @@ The service uses **x402** with facilitator-based verification. Payments are chai
 3. **Include payment proof** in request:
 
    ```bash
-   curl -X POST https://rng.mysterygift.fun/v1/randomness \
+   curl -X POST https://vrf.mysterygift.fun/v1/randomness \
      -H "Content-Type: application/json" \
      -H "X-Payment: x402 <base64-proof>" \
      -d '{"request_hash": "optional-identifier"}'
@@ -200,11 +200,13 @@ The service uses **x402** with facilitator-based verification. Payments are chai
 ### Payment Verification
 
 The facilitator verifies:
+
 - Payment completed on-chain (Solana or Base)
 - Correct amount received
 - Payment not expired
 
 The service enforces:
+
 - Replay protection (each paymentId used once)
 - Rate limiting per payment ID
 
@@ -215,7 +217,7 @@ The service enforces:
 ### 1. Generate Random Seed
 
 ```bash
-curl -X POST https://rng.mysterygift.fun/v1/randomness \
+curl -X POST https://vrf.mysterygift.fun/v1/randomness \
   -H "X-Payment: x402 <proof>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -238,7 +240,7 @@ curl -X POST https://rng.mysterygift.fun/v1/randomness \
 ### 2. Random Number
 
 ```bash
-curl -X POST https://rng.mysterygift.fun/v1/random/number \
+curl -X POST https://vrf.mysterygift.fun/v1/random/number \
   -H "X-Payment: x402 <proof>" \
   -d '{
     "min": 1,
@@ -262,7 +264,7 @@ curl -X POST https://rng.mysterygift.fun/v1/random/number \
 ### 3. Pick Winners
 
 ```bash
-curl -X POST https://rng.mysterygift.fun/v1/random/winners \
+curl -X POST https://vrf.mysterygift.fun/v1/random/winners \
   -H "X-Payment: x402 <proof>" \
   -d '{
     "items": ["Alice", "Bob", "Charlie", "David"],
@@ -288,7 +290,7 @@ curl -X POST https://rng.mysterygift.fun/v1/random/winners \
 ### 4. Using API Key (Partners)
 
 ```bash
-curl -X POST https://rng.mysterygift.fun/v1/random/dice \
+curl -X POST https://vrf.mysterygift.fun/v1/random/dice \
   -H "X-API-Key: your-secret-key" \
   -d '{"dice": "2d6"}'
 ```
@@ -388,7 +390,7 @@ Monitor facilitator verification:
 ### Health Check
 
 ```bash
-curl https://rng.mysterygift.fun/v1/health
+curl https://vrf.mysterygift.fun/v1/health
 ```
 
 **Response**:
@@ -433,7 +435,7 @@ curl https://rng.mysterygift.fun/v1/health
 
 ## Links
 
-- **Live**: https://rng.mysterygift.fun
+- **Live**: https://vrf.mysterygift.fun
 - **Phala Cloud**: https://cloud.phala.network
 - **Documentation**: https://docs.mysterygift.fun
 - **x402 Protocol**: https://x402.org

@@ -2,16 +2,17 @@
 
 Detailed API reference for the Verifiable Randomness Service.
 
-**Base URL**: `https://rng.mysterygift.fun`
+**Base URL**: `https://vrf.mysterygift.fun`
 
 ---
 
 ## Table of Contents
 
 1. [Authentication](#authentication)
-2. [Rate Limits](#rate-limits)
-3. [Error Handling](#error-handling)
-4. [Endpoints](#endpoints)
+2. [Testing x402 Payments](#testing-x402-payments)
+3. [Rate Limits](#rate-limits)
+4. [Error Handling](#error-handling)
+5. [Endpoints](#endpoints)
    - [Generate Random Seed](#post-v1randomness)
    - [Random Number](#post-v1randomnumber)
    - [Random Dice](#post-v1randomdice)
@@ -47,6 +48,78 @@ Include in request header:
 ```http
 X-API-Key: your-secret-key
 ```
+
+---
+
+## Testing x402 Payments
+
+### Option 1: Human UI (Browser)
+
+1. Visit https://vrf.mysterygift.fun
+2. Connect wallet (Solana via Phantom, Base via MetaMask)
+3. Select network (Solana or Base)
+4. Click "Generate Randomness"
+5. Approve the transaction in your wallet
+
+### Option 2: Programmatic (curl)
+
+#### Step 1: Get Payment Requirements
+
+```bash
+curl -X POST https://vrf.mysterygift.fun/v1/random/number \
+  -H "Content-Type: application/json" \
+  -d '{"min": 1, "max": 100}'
+```
+
+Returns **402 Payment Required** with instructions:
+
+```json
+{
+  "error": "Payment Required",
+  "x402": {
+    "scheme": "exact",
+    "network": "solana",
+    "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "payTo": "3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx",
+    "maxAmountRequired": "10000"
+  }
+}
+```
+
+#### Step 2: Complete Payment
+
+Pay $0.01 USDC to the `payTo` address using your wallet.
+
+#### Step 3: Retry with Payment Proof
+
+```bash
+# Build X-Payment header with transaction proof
+# For Solana: include signed transaction (base64)
+# For Base: include transaction hash (hex)
+
+curl -X POST https://vrf.mysterygift.fun/v1/random/number \
+  -H "Content-Type: application/json" \
+  -H "X-Payment: eyJ4MDAyIjogMSwgInNjaGVtZSI6ICJleGFjdCIsICJuZXR3b3JrIjogInNvbGFuYSIsICJwYXlsb2FkIjogeyJ0cmFuc2FjdGlvbiI6ICIuLi4ifX0=" \
+  -d '{"min": 1, "max": 100}'
+```
+
+### Option 3: Whitelist (Free)
+
+Add your domain to `WHITELIST` - requests from whitelisted origins are free.
+
+---
+
+### RPC Requirements (Hybrid Architecture)
+
+This service uses a **hybrid architecture**:
+
+| Component            | RPC Used                        | Why                                               |
+| -------------------- | ------------------------------- | ------------------------------------------------- |
+| Payment Verification | **None**                        | PayAI facilitator handles on-chain verification   |
+| Transaction Building | Helius (Solana), Alchemy (Base) | Frontend needs RPC to build unsigned transactions |
+| Result Delivery      | **None**                        | Randomness returned directly                      |
+
+For **server-to-server** API calls, you only need the payment step above - no RPC required from your infrastructure.
 
 ### x402 Payment
 
@@ -108,7 +181,7 @@ X-Payment: x402 eyJwYXltZW50SWQiOiJwYXlfYWJjMTIzIn0=
 **Allowed Origins**:
 
 - `https://mysterygift.fun`
-- `https://rng.mysterygift.fun`
+- `https://vrf.mysterygift.fun`
 - `https://*.mysterygift.fun` (all subdomains)
 
 **Blocked**: All other origins receive no CORS headers
@@ -155,7 +228,7 @@ Generate a 256-bit cryptographically secure random seed.
 
 ```http
 POST /v1/randomness HTTP/1.1
-Host: rng.mysterygift.fun
+Host: vrf.mysterygift.fun
 Content-Type: application/json
 X-Payment: x402 <base64-proof>
 
@@ -242,11 +315,11 @@ Generate a random integer between `min` and `max` (inclusive).
 **JavaScript**:
 
 ```javascript
-const response = await fetch('https://rng.mysterygift.fun/v1/random/number', {
-  method: 'POST',
+const response = await fetch("https://vrf.mysterygift.fun/v1/random/number", {
+  method: "POST",
   headers: {
-    'Content-Type': 'application/json',
-    'X-Payment': `x402 ${paymentProof}`,
+    "Content-Type": "application/json",
+    "X-Payment": `x402 ${paymentProof}`,
   },
   body: JSON.stringify({ min: 1, max: 6 }), // Dice roll
 });
@@ -261,7 +334,7 @@ console.log(`Rolled: ${number}`);
 import requests
 
 response = requests.post(
-    'https://rng.mysterygift.fun/v1/random/number',
+    'https://vrf.mysterygift.fun/v1/random/number',
     headers={'X-Payment': f'x402 {payment_proof}'},
     json={'min': 0, 'max': 99}
 )
@@ -313,12 +386,12 @@ Roll dice using standard notation (e.g., "2d6", "1d20").
 
 ```bash
 # Roll 3d6
-curl -X POST https://rng.mysterygift.fun/v1/random/dice \
+curl -X POST https://vrf.mysterygift.fun/v1/random/dice \
   -H "X-Payment: x402 <proof>" \
   -d '{"dice": "3d6"}'
 
 # Roll d20
-curl -X POST https://rng.mysterygift.fun/v1/random/dice \
+curl -X POST https://vrf.mysterygift.fun/v1/random/dice \
   -H "X-API-Key: <key>" \
   -d '{"dice": "1d20"}'
 ```
@@ -530,18 +603,18 @@ Health check endpoint.
 ```typescript
 // Using fetch API
 async function getRandomNumber(min: number, max: number) {
-  const response = await fetch('https://rng.mysterygift.fun/v1/random/number', {
-    method: 'POST',
+  const response = await fetch("https://vrf.mysterygift.fun/v1/random/number", {
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
-      'X-Payment': `x402 ${btoa(JSON.stringify(paymentProof))}`,
+      "Content-Type": "application/json",
+      "X-Payment": `x402 ${btoa(JSON.stringify(paymentProof))}`,
     },
     body: JSON.stringify({ min, max }),
   });
 
   if (!response.ok) {
     if (response.status === 429) {
-      console.error('Rate limit exceeded');
+      console.error("Rate limit exceeded");
     }
     throw new Error(`HTTP ${response.status}`);
   }
@@ -555,7 +628,7 @@ try {
   const random = await getRandomNumber(1, 100);
   console.log(`Random number: ${random}`);
 } catch (error) {
-  console.error('Failed to get random number:', error);
+  console.error("Failed to get random number:", error);
 }
 ```
 
@@ -573,7 +646,7 @@ def get_random_winners(items, count, api_key=None):
         headers['X-API-Key'] = api_key
 
     response = requests.post(
-        'https://rng.mysterygift.fun/v1/random/winners',
+        'https://vrf.mysterygift.fun/v1/random/winners',
         headers=headers,
         json={'items': items, 'count': count}
     )
@@ -591,18 +664,18 @@ for winner in winners:
 
 ```bash
 # Random number
-curl -X POST https://rng.mysterygift.fun/v1/random/number \
+curl -X POST https://vrf.mysterygift.fun/v1/random/number \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-secret-key" \
   -d '{"min": 1, "max": 100}'
 
 # Roll dice
-curl -X POST https://rng.mysterygift.fun/v1/random/dice \
+curl -X POST https://vrf.mysterygift.fun/v1/random/dice \
   -H "X-Payment: x402 <proof>" \
   -d '{"dice": "2d20"}'
 
 # Health check
-curl https://rng.mysterygift.fun/v1/health
+curl https://vrf.mysterygift.fun/v1/health
 ```
 
 ---
@@ -616,12 +689,12 @@ The attestation can be verified using the Phala TEE verification tools:
 ```javascript
 const attestation = JSON.parse(atob(response.attestation));
 
-if (attestation.type === 'tdx-attestation') {
+if (attestation.type === "tdx-attestation") {
   // Verify quote using Phala SDK or Intel TDX tools
   const isValid = await verifyTDXQuote(attestation.quote);
-  console.log('Attestation valid:', isValid);
-} else if (attestation.type === 'mock-tee-attestation') {
-  console.warn('Running in simulation mode - no hardware attestation');
+  console.log("Attestation valid:", isValid);
+} else if (attestation.type === "mock-tee-attestation") {
+  console.warn("Running in simulation mode - no hardware attestation");
 }
 ```
 
@@ -635,21 +708,21 @@ Each payment ID is single-use. Create a new payment intent for each request:
 
 ```javascript
 // 1. Create payment intent
-const { paymentId, paymentUrl } = await fetch('/v1/payment/create', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ network: 'solana' }),
-}).then(r => r.json());
+const { paymentId, paymentUrl } = await fetch("/v1/payment/create", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ network: "solana" }),
+}).then((r) => r.json());
 
 // 2. Complete payment via paymentUrl (facilitator handles on-chain tx)
 
 // 3. Use paymentId in proof
 const proof = btoa(JSON.stringify({ paymentId }));
-const result = await fetch('/v1/randomness', {
-  method: 'POST',
-  headers: { 'X-Payment': `x402 ${proof}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ request_hash: 'my-request' }),
-}).then(r => r.json());
+const result = await fetch("/v1/randomness", {
+  method: "POST",
+  headers: { "X-Payment": `x402 ${proof}`, "Content-Type": "application/json" },
+  body: JSON.stringify({ request_hash: "my-request" }),
+}).then((r) => r.json());
 ```
 
 ### 2. Handle Rate Limits
@@ -660,7 +733,7 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
     const response = await fetch(url, options);
 
     if (response.status === 429) {
-      const resetTime = response.headers.get('X-RateLimit-Reset');
+      const resetTime = response.headers.get("X-RateLimit-Reset");
       const waitMs = parseInt(resetTime) * 1000 - Date.now();
       await new Promise((resolve) => setTimeout(resolve, waitMs));
       continue;
@@ -668,7 +741,7 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
 
     return response;
   }
-  throw new Error('Max retries exceeded');
+  throw new Error("Max retries exceeded");
 }
 ```
 
@@ -685,7 +758,7 @@ await db.save({
   attestation: result.attestation,
   timestamp: result.timestamp,
   teeType: result.tee_type,
-  requestHash: 'my-app-123',
+  requestHash: "my-app-123",
 });
 ```
 

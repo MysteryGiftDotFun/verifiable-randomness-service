@@ -11,6 +11,7 @@ export interface LandingConfig {
   paymentWallet: string;
   paymentWalletBase?: string;
   heliusRpcUrl?: string;
+  baseRpcUrl?: string;
   facilitatorUrl: string;
   supportedNetworks: string[];
   arweaveEnabled: boolean;
@@ -29,6 +30,7 @@ export function renderLandingPage(config: LandingConfig): string {
     paymentWallet,
     paymentWalletBase,
     heliusRpcUrl,
+    baseRpcUrl,
     facilitatorUrl,
     supportedNetworks,
     arweaveEnabled,
@@ -44,6 +46,7 @@ export function renderLandingPage(config: LandingConfig): string {
   const solanaWallet = paymentWallet;
   const baseWallet = paymentWalletBase || paymentWallet;
   const heliusRpc = heliusRpcUrl || "";
+  const baseRpc = baseRpcUrl || "";
 
   return `
 <!DOCTYPE html>
@@ -720,7 +723,7 @@ export function renderLandingPage(config: LandingConfig): string {
             <span class="card-label">Compose Hash (Code Fingerprint)</span>
             <div class="hash-display" id="compose-hash" style="font-size:0.7rem;">${composeHash}</div>
             <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem;">
-              Compare this hash with <a href="https://github.com/mysterygift/mystery-gift" target="_blank" style="color:var(--accent);">our source code</a> to verify we're running the exact code you expect.
+              Compare this hash with <a href="https://github.com/MysteryGiftDotFun/verifiable-randomness-service" target="_blank" style="color:var(--accent);">our source code</a> to verify we're running the exact code you expect.
             </p>
           </div>
 
@@ -949,6 +952,7 @@ if (expected === arweaveProof.commitment_hash) {
     const PAYMENT_WALLET = '${paymentWallet}';
     const PAYMENT_WALLET_BASE = '${baseWallet}';
     const HELIUS_RPC_URL = '${heliusRpc}';
+    const BASE_RPC_URL = '${baseRpc}';
     const FACILITATOR_URL = '${facilitatorUrl}';
     const SUPPORTED_NETWORKS = ${networksJson};
     const HAS_BASE = ${hasBase ? "true" : "false"};
@@ -1356,7 +1360,7 @@ if (expected === arweaveProof.commitment_hash) {
           // Base/EVM payment using WalletConnect or injected provider
           log('Connecting to Base network...');
 
-          const baseRpcUrl = 'https://base-mainnet.g.alchemy.com/v2/demo'; // Use demo for now
+          const baseRpcUrl = BASE_RPC_URL || 'https://mainnet.base.org';
           const usdcAddress = requirements.asset; // 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
           const toAddress = requirements.payTo;
           const amount = BigInt(requirements.maxAmountRequired);
