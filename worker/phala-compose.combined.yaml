@@ -1,4 +1,21 @@
 services:
+  # dstack-ingress for custom domain SSL
+  dstack-ingress:
+    image: dstacktee/dstack-ingress:20250924@sha256:40429d78060ef3066b5f93676bf3ba7c2e9ac47d4648440febfdda558aed4b32
+    ports:
+      - "443:443"
+    environment:
+      - DOMAIN=vrf.mysterygift.fun
+      - TARGET_ENDPOINT=http://randomness-prod:3000
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
+      - GATEWAY_DOMAIN=${DSTACK_GATEWAY_DOMAIN}
+      - CERTBOT_EMAIL=${CERTBOT_EMAIL:-admin@mysterygift.fun}
+      - SET_CAA=true
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - cert-data:/etc/letsencrypt
+    restart: unless-stopped
+
   # Redis for persistent replay protection
   redis:
     image: redis:7-alpine
@@ -14,7 +31,7 @@ services:
 
   # Production service (mainnet)
   randomness-prod:
-    image: phantasybot/verifiable-randomness-service:v0.1.0-BETA-v9
+    image: phantasybot/verifiable-randomness-service:v0.1.0-BETA-v11
     ports:
       - "3000:3000"
     environment:
@@ -26,13 +43,13 @@ services:
       - PAYMENT_WALLET=${PAYMENT_WALLET:-3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx}
       - PAYMENT_WALLET_BASE=${PAYMENT_WALLET_BASE:-}
       - HELIUS_RPC_URL=${HELIUS_RPC_URL:-}
-      - WHITELIST=${WHITELIST:-api.mysterygift.fun,vault.mysterygift.fun,agent.mysterygift.fun,tcg.mysterygift.fun,rng.mysterygift.fun,localhost}
+      - WHITELIST=${WHITELIST:-api.mysterygift.fun,vault.mysterygift.fun,agent.mysterygift.fun,tcg.mysterygift.fun,vrf.mysterygift.fun,localhost}
       - API_KEYS=${API_KEYS:-}
       - X402_FACILITATOR_URL=${X402_FACILITATOR_URL:-https://facilitator.payai.network}
       - X402_API_KEY=${X402_API_KEY:-}
       - SUPPORTED_NETWORKS=${SUPPORTED_NETWORKS:-solana,base}
       - ARWEAVE_ENABLED=${ARWEAVE_ENABLED:-true}
-      - PHALA_CLUSTER=${PHALA_CLUSTER:-prod9}
+      - PHALA_CLUSTER=${PHALA_CLUSTER:-prod5}
       - REDIS_URL=redis://redis:6379
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
@@ -49,7 +66,7 @@ services:
 
   # Development service (devnet)
   randomness-dev:
-    image: phantasybot/verifiable-randomness-service:v0.1.0-BETA-v9
+    image: phantasybot/verifiable-randomness-service:v0.1.0-BETA-v11
     ports:
       - "3001:3001"
     environment:
@@ -61,13 +78,13 @@ services:
       - PAYMENT_WALLET=${PAYMENT_WALLET_DEV:-}
       - PAYMENT_WALLET_BASE=${PAYMENT_WALLET_BASE_DEV:-}
       - HELIUS_RPC_URL=${HELIUS_RPC_URL_DEV:-}
-      - WHITELIST=${WHITELIST_DEV:-api-dev.mysterygift.fun,vault-dev.mysterygift.fun,agent-dev.mysterygift.fun,rng-dev.mysterygift.fun,localhost}
+      - WHITELIST=${WHITELIST_DEV:-api-dev.mysterygift.fun,vault-dev.mysterygift.fun,agent-dev.mysterygift.fun,vrf-dev.mysterygift.fun,localhost}
       - API_KEYS=${API_KEYS:-}
       - X402_FACILITATOR_URL=${X402_FACILITATOR_URL:-https://facilitator.payai.network}
       - X402_API_KEY=${X402_API_KEY:-}
       - SUPPORTED_NETWORKS=${SUPPORTED_NETWORKS:-solana,base}
       - ARWEAVE_ENABLED=${ARWEAVE_ENABLED:-true}
-      - PHALA_CLUSTER=${PHALA_CLUSTER:-prod9}
+      - PHALA_CLUSTER=${PHALA_CLUSTER:-prod5}
       - REDIS_URL=redis://redis:6379
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
@@ -84,3 +101,4 @@ services:
 
 volumes:
   redis-data:
+  cert-data:

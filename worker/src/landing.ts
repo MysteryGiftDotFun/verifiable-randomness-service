@@ -150,7 +150,7 @@ export function renderLandingPage(config: LandingConfig): string {
       --text-muted: #A1A1AA;
       --accent: #FF4D00;
       --accent-glow: rgba(255, 77, 0, 0.2);
-      --success: #34D399;
+      --success: #ffffff;
       --font: 'Sometype Mono', monospace;
 
       --clip-cyber: polygon(
@@ -316,7 +316,7 @@ export function renderLandingPage(config: LandingConfig): string {
       transition: all 0.2s;
     }
     .wallet-btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); }
-    .wallet-btn.connected { background: rgba(52, 211, 153, 0.1); border-color: rgba(52, 211, 153, 0.3); color: var(--success); }
+    .wallet-btn.connected { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.3); color: #ffffff; }
 
     .tabs {
       display: flex;
@@ -532,7 +532,7 @@ export function renderLandingPage(config: LandingConfig): string {
       flex-shrink: 0;
     }
     .console-header { padding: 0.6rem 2rem; display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.02); }
-    .console-indicator { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 5px var(--success); }
+    .console-indicator { width: 6px; height: 6px; border-radius: 50%; background: #ffffff; box-shadow: 0 0 5px #ffffff; }
     .console-content { padding: 0 2rem 1rem; overflow-y: auto; height: 160px; }
     .console-bar.expanded { height: 200px; }
 
@@ -547,7 +547,7 @@ export function renderLandingPage(config: LandingConfig): string {
     }
 
     .log-line { margin-bottom: 4px; }
-    .log-success { color: var(--success); }
+    .log-success { color: #ffffff; }
     .log-error { color: #F87171; }
     .log-info { color: #A5B4FC; }
 
@@ -582,8 +582,8 @@ export function renderLandingPage(config: LandingConfig): string {
     .receipt-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: none; justify-content: center; align-items: center; z-index: 1000; padding: 1rem; }
     .receipt-overlay.visible { display: flex; animation: fadeIn 0.3s ease; }
     .receipt-modal { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 16px; max-width: 480px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5); }
-    .receipt-header { padding: 1.5rem 2rem; background: linear-gradient(135deg, rgba(52, 211, 153, 0.15) 0%, rgba(52, 211, 153, 0.05) 100%); border-bottom: 1px solid rgba(52, 211, 153, 0.2); display: flex; align-items: center; justify-content: space-between; }
-    .receipt-header h3 { display: flex; align-items: center; gap: 0.6rem; font-size: 1rem; font-weight: 600; color: var(--success); text-transform: uppercase; letter-spacing: 0.05em; }
+    .receipt-header { padding: 1.5rem 2rem; background: rgba(0, 0, 0, 0.4); border-bottom: 1px solid var(--panel-border); display: flex; align-items: center; justify-content: space-between; }
+    .receipt-header h3 { display: flex; align-items: center; gap: 0.6rem; font-size: 1rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; }
     .receipt-close { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.5rem; line-height: 1; padding: 0.25rem; transition: color 0.2s; }
     .receipt-close:hover { color: var(--text-main); }
     .receipt-section { padding: 1.25rem 2rem; border-bottom: 1px solid var(--panel-border); }
@@ -594,7 +594,7 @@ export function renderLandingPage(config: LandingConfig): string {
     .receipt-label { font-size: 0.8rem; color: var(--text-muted); flex-shrink: 0; }
     .receipt-value { font-size: 0.8rem; color: var(--text-main); text-align: right; word-break: break-all; font-family: monospace; }
     .receipt-value.highlight { color: var(--accent); font-weight: 600; }
-    .receipt-value.success { color: var(--success); }
+    .receipt-value.success { color: #ffffff; }
     .receipt-link { color: var(--accent); text-decoration: none; display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; }
     .receipt-link:hover { text-decoration: underline; }
     .receipt-result { font-size: 1.5rem; font-weight: 700; color: var(--accent); text-align: center; padding: 1rem 0; font-family: var(--font); }
@@ -607,9 +607,9 @@ export function renderLandingPage(config: LandingConfig): string {
     .receipt-btn-primary:hover { background: #ff6a33; }
     .receipt-btn-secondary { background: transparent; color: var(--text-main); border: 1px solid var(--panel-border); }
     .receipt-btn-secondary:hover { background: rgba(255, 255, 255, 0.05); }
-    .toast { position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%) translateY(100px); background: var(--success); color: #000; padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 0.85rem; font-weight: 600; z-index: 2000; opacity: 0; transition: all 0.3s ease; }
+    .toast { position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%) translateY(100px); background: #ffffff; color: #000; padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 0.85rem; font-weight: 600; z-index: 2000; opacity: 0; transition: all 0.3s ease; }
     .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
-    .verification-badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.8rem; background: rgba(52, 211, 153, 0.15); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 6px; font-size: 0.75rem; color: var(--success); font-weight: 500; }
+    .verification-badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.8rem; background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 6px; font-size: 0.75rem; color: #ffffff; font-weight: 500; }
   </style>
 </head>
 <body>
@@ -736,7 +736,7 @@ export function renderLandingPage(config: LandingConfig): string {
             </p>
 
             <a href="https://proof.t16z.com/" target="_blank" style="text-decoration:none; display:block; margin-bottom:0.5rem;">
-              <button class="std-btn" style="width:100%; background:rgba(52, 211, 153, 0.05); border-color:rgba(52, 211, 153, 0.2); color:var(--success);">
+              <button class="std-btn" style="width:100%; background:rgba(255, 255, 255, 0.05); border-color:rgba(255, 255, 255, 0.2); color:#ffffff;">
                 <iconify-icon icon="ph:seal-check-fill" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
                 TEE Attestation Explorer
               </button>
@@ -767,11 +767,11 @@ export function renderLandingPage(config: LandingConfig): string {
             <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.8rem; line-height:1.7;">
               <div style="margin-bottom:0.5rem; display:flex; gap:8px;">
                 <span style="color:var(--accent); font-weight:700; min-width:18px;">1.</span>
-                <span>Save the <code style="color:var(--success);">random_seed</code> from your API response</span>
+                <span>Save the <code style="color:#ffffff;">random_seed</code> from your API response</span>
               </div>
-              <div style="margin-bottom:0.5rem; display:flex; gap:8px;">
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.8rem; line-height:1.7; display:flex; gap:0.3rem;">
                 <span style="color:var(--accent); font-weight:700; min-width:18px;">2.</span>
-                <span>Visit your <code style="color:var(--success);">arweave_url</code> to get the <code style="color:var(--success);">commitment_hash</code></span>
+                <span>Visit your <code style="color:#ffffff;">arweave_url</code> to get the <code style="color:#ffffff;">commitment_hash</code></span>
               </div>
               <div style="margin-bottom:0.5rem; display:flex; gap:8px;">
                 <span style="color:var(--accent); font-weight:700; min-width:18px;">3.</span>
@@ -1664,12 +1664,12 @@ if (expected === arweaveProof.commitment_hash) {
               Don't trust our verification — verify the attestation yourself:
             </div>
             <a href="https://proof.t16z.com/" target="_blank" style="text-decoration: none; display: block; margin-bottom: 0.5rem;">
-              <button style="width: 100%; padding: 0.6rem; background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 8px; color: var(--success); font-size: 0.75rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
+              <button style="width: 100%; padding: 0.6rem; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 8px; color: #ffffff; font-size: 0.75rem; font-family: var(--font); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
                 <iconify-icon icon="ph:arrow-square-out"></iconify-icon>
                 Verify at proof.t16z.com
               </button>
             </a>
-            <button onclick="navigator.clipboard.writeText(window.currentReceipt?.attestation?.quote_hex || ''); showToast('Quote copied! Paste in explorer.');" style="width: 100%; padding: 0.6rem; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 8px; color: var(--text-main); font-size: 0.75rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
+            <button onclick="navigator.clipboard.writeText(window.currentReceipt?.attestation?.quote_hex || ''); showToast('Quote copied! Paste in explorer.');" style="width: 100%; padding: 0.6rem; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 8px; color: var(--text-main); font-size: 0.75rem; font-family: var(--font); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
               <iconify-icon icon="ph:copy"></iconify-icon>
               Copy Attestation Quote
             </button>
