@@ -147,6 +147,7 @@ export function renderLandingPage(config: LandingConfig): string {
 
   <script>
     // EIP-3009 Transfer with Authorization helpers
+    // Use MetaMask's eth_signTypedData_v4 for signing
     const EIP3009 = {
       // USDC contract addresses by chain
       USDC_ADDRESSES: {
@@ -161,44 +162,44 @@ export function renderLandingPage(config: LandingConfig): string {
         return '0x' + Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
       },
 
-      // Build EIP-712 domain separator for USDC
-      getDomainSeparator(chainId, contractAddress) {
+      // Build EIP-712 typed data for EIP-3009 TransferWithAuthorization
+      buildTypedData(from, to, value, validAfter, validBefore, nonce, chainId, usdcAddress) {
         return {
-          name: 'USD Coin',
-          version: '2',
-          chainId: parseInt(chainId, 16),
-          verifyingContract: contractAddress,
+          domain: {
+            name: 'USD Coin',
+            version: '2',
+            chainId: parseInt(chainId, 16),
+            verifyingContract: usdcAddress,
+          },
+          message: {
+            from: from,
+            to: to,
+            value: value.toString(),
+            validAfter: validAfter.toString(),
+            validBefore: validBefore.toString(),
+            nonce: nonce,
+          },
+          primaryType: 'TransferWithAuthorization',
+          types: {
+            EIP712Domain: [
+              { name: 'name', type: 'string' },
+              { name: 'version', type: 'string' },
+              { name: 'chainId', type: 'uint256' },
+              { name: 'verifyingContract', type: 'address' },
+            ],
+            TransferWithAuthorization: [
+              { name: 'from', type: 'address' },
+              { name: 'to', type: 'address' },
+              { name: 'value', type: 'uint256' },
+              { name: 'validAfter', type: 'uint256' },
+              { name: 'validBefore', type: 'uint256' },
+              { name: 'nonce', type: 'bytes32' },
+            ],
+          },
         };
       },
 
-      // Build EIP-712 types for EIP-3009 TransferWithAuthorization
-      // Note: Don't include EIP712Domain in types - ethers.js derives it from domain parameter
-      getTypes() {
-        return {
-          TransferWithAuthorization: [
-            { name: 'from', type: 'address' },
-            { name: 'to', type: 'address' },
-            { name: 'value', type: 'uint256' },
-            { name: 'validAfter', type: 'uint256' },
-            { name: 'validBefore', type: 'uint256' },
-            { name: 'nonce', type: 'bytes32' },
-          ],
-        };
-      },
-
-      // Build the message to sign
-      buildMessage(from, to, value, validAfter, validBefore, nonce) {
-        return {
-          from,
-          to,
-          value: value.toString(),
-          validAfter: validAfter.toString(),
-          validBefore: validBefore.toString(),
-          nonce,
-        };
-      },
-
-      // Sign EIP-3009 authorization using ethers.js
+      // Sign EIP-3009 authorization using MetaMask's eth_signTypedData_v4
       async signAuthorization(provider, from, to, value, chainId, network = 'base') {
         const usdcAddress = this.USDC_ADDRESSES[network] || this.USDC_ADDRESSES['base'];
         
@@ -207,18 +208,14 @@ export function renderLandingPage(config: LandingConfig): string {
         const validBefore = validAfter + 300; // 5 minutes
         const nonce = this.generateNonce();
         
-        // Build EIP-712 domain and message
-        const domain = this.getDomainSeparator(chainId, usdcAddress);
-        const types = this.getTypes();
-        const message = this.buildMessage(from, to, value, validAfter, validBefore, nonce);
+        // Build the typed data
+        const typedData = this.buildTypedData(from, to, value, validAfter, validBefore, nonce, chainId, usdcAddress);
         
-        // Create ethers provider and signer
-        const ethersProvider = new ethers.providers.Web3Provider(provider);
-        const signer = ethersProvider.getSigner();
-        
-        // Sign the typed data using signTypedData (not _signTypedData)
-        // ethers.js v5 will automatically include EIP712Domain from the domain param
-        const signature = await signer.signTypedData(domain, types, message);
+        // Use MetaMask's eth_signTypedData_v4 directly
+        const signature = await provider.request({
+          method: 'eth_signTypedData_v4',
+          params: [from, JSON.stringify(typedData)],
+        });
         
         // Return the authorization and signature
         return {
