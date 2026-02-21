@@ -62,6 +62,7 @@ export function renderLandingPage(config: LandingConfig): string {
 
   <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
   <script src="https://unpkg.com/@solana/web3.js@1.95.8/lib/index.iife.min.js"></script>
+  <script src="https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <script>
     // Inline SPL Token helpers (spl-token IIFE not available in v0.4.x)
     const SPL_TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -141,6 +142,101 @@ export function renderLandingPage(config: LandingConfig): string {
           data,
         });
       }
+    };
+  </script>
+
+  <script>
+    // EIP-3009 Transfer with Authorization helpers
+    const EIP3009 = {
+      // USDC contract addresses by chain
+      USDC_ADDRESSES: {
+        'base': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        'base-sepolia': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      },
+
+      // Generate a random 32-byte nonce
+      generateNonce() {
+        const array = new Uint8Array(32);
+        crypto.getRandomValues(array);
+        return '0x' + Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+      },
+
+      // Build EIP-712 domain separator for USDC
+      getDomainSeparator(chainId, contractAddress) {
+        return {
+          name: 'USD Coin',
+          version: '2',
+          chainId: parseInt(chainId, 16),
+          verifyingContract: contractAddress,
+        };
+      },
+
+      // Build EIP-712 types for EIP-3009 TransferWithAuthorization
+      getTypes() {
+        return {
+          EIP712Domain: [
+            { name: 'name', type: 'string' },
+            { name: 'version', type: 'string' },
+            { name: 'chainId', type: 'uint256' },
+            { name: 'verifyingContract', type: 'address' },
+          ],
+          TransferWithAuthorization: [
+            { name: 'from', type: 'address' },
+            { name: 'to', type: 'address' },
+            { name: 'value', type: 'uint256' },
+            { name: 'validAfter', type: 'uint256' },
+            { name: 'validBefore', type: 'uint256' },
+            { name: 'nonce', type: 'bytes32' },
+          ],
+        };
+      },
+
+      // Build the message to sign
+      buildMessage(from, to, value, validAfter, validBefore, nonce) {
+        return {
+          from,
+          to,
+          value: value.toString(),
+          validAfter: validAfter.toString(),
+          validBefore: validBefore.toString(),
+          nonce,
+        };
+      },
+
+      // Sign EIP-3009 authorization using ethers.js
+      async signAuthorization(provider, from, to, value, chainId, network = 'base') {
+        const usdcAddress = this.USDC_ADDRESSES[network] || this.USDC_ADDRESSES['base'];
+        
+        // Generate authorization parameters
+        const validAfter = Math.floor(Date.now() / 1000);
+        const validBefore = validAfter + 300; // 5 minutes
+        const nonce = this.generateNonce();
+        
+        // Build EIP-712 domain and message
+        const domain = this.getDomainSeparator(chainId, usdcAddress);
+        const types = this.getTypes();
+        const message = this.buildMessage(from, to, value, validAfter, validBefore, nonce);
+        
+        // Create ethers provider and signer
+        const ethersProvider = new ethers.providers.Web3Provider(provider);
+        const signer = ethersProvider.getSigner();
+        
+        // Sign the typed data
+        const signature = await signer._signTypedData(domain, types, message);
+        
+        // Return the authorization and signature
+        return {
+          signature,
+          authorization: {
+            from,
+            to,
+            value: value.toString(),
+            validAfter: validAfter.toString(),
+            validBefore: validBefore.toString(),
+            nonce,
+          },
+        };
+      },
     };
   </script>
 
@@ -1311,11 +1407,10 @@ if (expected === arweaveProof.commitment_hash) {
           }
 
         } else if (selectedNetwork === 'base') {
-          // Base/EVM payment using WalletConnect or injected provider
+          // Base/EVM payment using EIP-3009 (Transfer with Authorization)
+          // This enables gasless USDC transfers verified via x402 facilitator
           log('Connecting to Base network...');
 
-          const baseRpcUrl = BASE_RPC_URL || 'https://mainnet.base.org';
-          const usdcAddress = requirements.asset; // 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
           const toAddress = requirements.payTo;
           const amount = BigInt(requirements.maxAmountRequired);
 
@@ -1324,7 +1419,6 @@ if (expected === arweaveProof.commitment_hash) {
           
           // Try to get provider from WalletConnect or other injected providers
           if (!ethProvider) {
-            // Check for WalletConnect or other injected providers
             if (window.walletConnectProvider) {
               ethProvider = window.walletConnectProvider;
             } else if (window.coinbaseWallet) {
@@ -1333,7 +1427,6 @@ if (expected === arweaveProof.commitment_hash) {
           }
 
           if (!ethProvider) {
-            // Try to request accounts to trigger MetaMask
             try {
               const accounts = await window.ethereum?.request({ method: 'eth_requestAccounts' });
               if (accounts && accounts.length > 0) {
@@ -1352,85 +1445,43 @@ if (expected === arweaveProof.commitment_hash) {
 
           log('Wallet connected: ' + fromAddress.slice(0, 6) + '...' + fromAddress.slice(-4));
 
-          // Build USDC transfer data
-          // USDC on Base has 6 decimals, amount is already in base units
-          const amountHex = '0x' + amount.toString(16);
-
-          // USDC transfer function selector (transfer(address,uint256))
-          const transferFn = '0xa9059cbb';
-          const toAddressPadded = toAddress.slice(2).padStart(64, '0');
-          const amountPadded = amount.toString(16).padStart(64, '0');
-          const txData = transferFn + toAddressPadded + amountPadded;
-
-          // Build transaction
-          const tx = {
-            from: fromAddress,
-            to: usdcAddress,
-            data: txData,
-            value: '0x0',
-          };
-
-          // Get gas estimate
-          try {
-            const gasEstimate = await ethProvider.request({
-              method: 'eth_estimateGas',
-              params: [tx],
-            });
-            tx.gas = gasEstimate;
-          } catch (e) {
-            log('Using default gas limit', 'warn');
-            tx.gas = '0x' + (21000).toString(16);
-          }
-
-          // Get chain ID
+          // Get chain ID to determine network
           const chainId = await ethProvider.request({ method: 'eth_chainId' });
-
-          // Get nonce
-          const nonce = await ethProvider.request({
-            method: 'eth_getTransactionCount',
-            params: [fromAddress, 'latest'],
-          });
-
-          tx.nonce = nonce;
-          tx.chainId = chainId;
-
-          // Get gas price
-          const gasPrice = await ethProvider.request({ method: 'eth_gasPrice' });
-          tx.gasPrice = gasPrice;
-
-          log('Please approve the transaction in your wallet...');
-
-          // Sign and send transaction
-          const txHash = await ethProvider.request({
-            method: 'eth_sendTransaction',
-            params: [tx],
-          });
-
-          log('Transaction submitted, waiting for confirmation...');
-
-          // Wait for transaction receipt
-          let receipt = null;
-          for (let i = 0; i < 30; i++) {
-            await new Promise(r => setTimeout(r, 2000));
-            receipt = await ethProvider.request({
-              method: 'eth_getTransactionReceipt',
-              params: [txHash],
-            });
-            if (receipt) break;
+          
+          // Determine if we're on Base mainnet or Base Sepolia
+          const baseChainIds = {
+            '0x2105': 'base',      // Base mainnet
+            '0x14a34': 'base-sepolia', // Base Sepolia testnet
+          };
+          const networkName = baseChainIds[chainId] || 'base';
+          
+          if (networkName === 'base-sepolia') {
+            log('Detected Base Sepolia testnet', 'warn');
           }
 
-          if (!receipt || receipt.status === '0x0') {
-            throw new Error('Transaction failed');
-          }
+          log('Signing EIP-3009 authorization...');
 
-          log('Transaction confirmed!');
+          // Sign EIP-3009 authorization using ethers.js
+          const { signature, authorization } = await EIP3009.signAuthorization(
+            ethProvider,
+            fromAddress,
+            toAddress,
+            amount,
+            chainId,
+            networkName
+          );
 
-          // Build X-PAYMENT header with transaction hash
+          log('Authorization signed!');
+
+          // Build X-PAYMENT header with EIP-3009 authorization
           const paymentPayload = {
             x402Version: 1,
-            scheme: requirements.scheme || 'exact',
-            network: 'base',
-            payload: { transactionHash: txHash },
+            scheme: 'exact',
+            network: networkName,
+            payload: {
+              signature: signature,
+              authorization: authorization,
+            },
           };
 
           const xPaymentHeader = btoa(JSON.stringify(paymentPayload));
@@ -1456,7 +1507,9 @@ if (expected === arweaveProof.commitment_hash) {
           }
 
           const data = await res.json();
-          if (data.error) throw new Error(data.error);
+          let errorMsg = data.error;
+          if (data.reason) errorMsg = errorMsg + ' (' + data.reason + ')';
+          if (data.error) throw new Error(errorMsg);
 
           // Store commitment (Arweave proof) data
           if (data.commitment) {
