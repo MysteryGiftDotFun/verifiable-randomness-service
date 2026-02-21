@@ -172,14 +172,9 @@ export function renderLandingPage(config: LandingConfig): string {
       },
 
       // Build EIP-712 types for EIP-3009 TransferWithAuthorization
+      // Note: Don't include EIP712Domain in types - ethers.js derives it from domain parameter
       getTypes() {
         return {
-          EIP712Domain: [
-            { name: 'name', type: 'string' },
-            { name: 'version', type: 'string' },
-            { name: 'chainId', type: 'uint256' },
-            { name: 'verifyingContract', type: 'address' },
-          ],
           TransferWithAuthorization: [
             { name: 'from', type: 'address' },
             { name: 'to', type: 'address' },
@@ -221,8 +216,9 @@ export function renderLandingPage(config: LandingConfig): string {
         const ethersProvider = new ethers.providers.Web3Provider(provider);
         const signer = ethersProvider.getSigner();
         
-        // Sign the typed data
-        const signature = await signer._signTypedData(domain, types, message);
+        // Sign the typed data using signTypedData (not _signTypedData)
+        // ethers.js v5 will automatically include EIP712Domain from the domain param
+        const signature = await signer.signTypedData(domain, types, message);
         
         // Return the authorization and signature
         return {
