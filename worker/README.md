@@ -22,12 +22,12 @@ cd ~/mystery-gift-deploy
 
 # Deploy prod
 npx phala deploy --cvm-id de014c8e6c862d1d0799ec035e85f93912769f12 \
-  -c services/verifiable-randomness-service/worker/phala-compose.prod-v14.yaml \
+  -c services/verifiable-randomness-service/worker/phala-compose.prod-v15.yaml \
   -e services/verifiable-randomness-service/worker/.env
 
 # Deploy dev
 npx phala deploy --cvm-id 68bfb1758fa20d75cac0af456e9868e4f1cc9e7c \
-  -c services/verifiable-randomness-service/worker/phala-compose.dev-v14.yaml \
+  -c services/verifiable-randomness-service/worker/phala-compose.dev-v15.yaml \
   -e services/verifiable-randomness-service/worker/.env
 ```
 
