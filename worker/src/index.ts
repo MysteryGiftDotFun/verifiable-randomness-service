@@ -46,7 +46,6 @@ const PORT = parseInt(process.env.PORT || "3000", 10);
 
 // Configuration
 const PRICE_PER_REQUEST_CENTS = 1; // $0.01 per attestation
-const WHITELIST = (process.env.WHITELIST || "").split(",").filter(Boolean);
 const API_KEYS = (process.env.API_KEYS || "").split(",").filter(Boolean);
 
 const PAYMENT_WALLET = (() => {
@@ -369,7 +368,7 @@ let TEE_TYPE = "simulation";
 const usageStats = {
   totalRequests: 0,
   paidRequests: 0,
-  whitelistedRequests: 0,
+  apiKeyRequests: 0,
   totalRevenueCents: 0,
 };
 
@@ -411,49 +410,16 @@ app.use("/v1/", globalLimiter);
  * 2. X-PAYMENT header present → decode, verify via facilitator, run handler, settle
  */
 async function authMiddleware(req: Request, res: Response, next: NextFunction) {
-  const origin = req.get("origin") || req.get("referer") || "";
-  const clientIp = req.ip || req.socket.remoteAddress || "";
   const apiKey = req.get("X-API-Key") || req.query.api_key;
 
-  // 1. Check whitelist (free access for Mystery Gift apps)
-  // Extract hostname from origin (e.g., "https://api.mysterygift.fun" -> "api.mysterygift.fun")
-  let originHost = "";
-  try {
-    if (origin) {
-      originHost = new URL(origin).hostname;
-    }
-  } catch {
-    // Invalid URL, use origin as-is for IP matching
-    originHost = origin;
-  }
-
-  const isWhitelisted = WHITELIST.some((entry) => {
-    // IP address matching
-    if (clientIp && clientIp.includes(entry)) {
-      return true;
-    }
-    // Wildcard subdomain matching: *.domain.com matches any.domain.com
-    if (entry.startsWith("*.")) {
-      const baseDomain = entry.slice(2); // Remove "*."
-      return originHost === baseDomain || originHost.endsWith("." + baseDomain);
-    }
-    // Exact hostname match only
-    return originHost === entry;
-  });
-
-  if (isWhitelisted) {
-    usageStats.whitelistedRequests++;
-    (req as any).paymentStatus = "whitelisted";
-    return next();
-  }
-
-  // 2. Check API key (free access for authorized partners)
+  // 1. Check API key (free access for authorized partners)
   if (apiKey && API_KEYS.includes(apiKey as string)) {
+    usageStats.apiKeyRequests++;
     (req as any).paymentStatus = "api_key";
     return next();
   }
 
-  // 3. Check x402 X-PAYMENT header
+  // 2. Check x402 X-PAYMENT header
   const paymentHeader = req.get("X-Payment");
 
   if (!paymentHeader) {

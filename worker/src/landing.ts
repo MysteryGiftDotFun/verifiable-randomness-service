@@ -1132,7 +1132,7 @@ if (expected === arweaveProof.commitment_hash) {
           receiptData.params = { items: body.items };
         }
 
-        // 2. Make initial request to get PaymentRequirements (402)
+        // 2. Make initial request to get PaymentRequirements (should always be 402)
         log('Fetching payment requirements...');
         const initialRes = await fetch(endpoint, {
           method: 'POST',
@@ -1140,56 +1140,10 @@ if (expected === arweaveProof.commitment_hash) {
           body: JSON.stringify(body),
         });
 
+        // We always expect 402 Payment Required (everyone pays now)
         if (initialRes.status !== 402) {
-          // If not 402, endpoint may be free or errored
           const data = await initialRes.json();
-          if (data.error) throw new Error(data.error);
-          receiptData.result = { random_seed: data.random_seed, tee_type: data.tee_type, attestation: data.attestation };
-          if (data.number !== undefined) receiptData.result.value = data.number;
-          if (data.total !== undefined) receiptData.result.value = data.total + ' (' + data.rolls.join(', ') + ')';
-          if (data.picked !== undefined) receiptData.result.value = data.picked;
-          receiptData.payment = { method: 'Free (whitelisted)', amount: '$0.00' };
-
-          // Store commitment (Arweave proof) data
-          if (data.commitment) {
-            receiptData.commitment = {
-              hash: data.commitment.commitment_hash,
-              arweave_tx: data.commitment.arweave_tx,
-              arweave_url: data.commitment.arweave_url,
-            };
-          }
-
-          // Fetch attestation info for free requests too
-          try {
-            const attRes = await fetch('/v1/attestation');
-            const attData = await attRes.json();
-            receiptData.attestation = {
-              app_id: attData.app_id,
-              compose_hash: attData.compose_hash || 'Simulation Mode',
-              tee_type: attData.tee_type,
-              quote_hex: attData.quote_hex || null,
-            };
-            if (attData.quote_hex) {
-              const verifyRes = await fetch('/v1/verify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ quote_hex: attData.quote_hex }),
-              });
-              const verifyData = await verifyRes.json();
-              receiptData.verification = {
-                valid: verifyData.valid,
-                verified_by: 'Phala Cloud Attestation API',
-              };
-            } else {
-              receiptData.verification = { valid: false, note: 'Simulation mode' };
-            }
-          } catch(e) {
-            receiptData.verification = { valid: false, error: e.message };
-          }
-
-          log('Complete! (no payment required)', 'success');
-          showReceipt(receiptData);
-          return;
+          throw new Error(data.error || 'Unexpected response from server: ' + initialRes.status);
         }
 
         const paymentInfo = await initialRes.json();

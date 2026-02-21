@@ -2,9 +2,9 @@
 
 A secure randomness generator designed to run inside a **Phala Network TEE (Trusted Execution Environment)**. Provides provably fair random numbers with hardware attestation.
 
-## Deployment (v14 - Current)
+## Deployment (v15 - Current)
 
-**For deploying v14 with custom domain SSL, see [DNS-SETUP.md](./DNS-SETUP.md)**
+**For deploying v15 with custom domain SSL, see [DNS-SETUP.md](./DNS-SETUP.md)**
 
 ### Quick Deploy to Phala Cloud
 
@@ -14,8 +14,8 @@ ssh hetzner-phantasy-001
 
 # 2. Build and push image
 cd ~/mystery-gift-deploy/services/verifiable-randomness-service/worker
-sudo docker build -t phantasybot/verifiable-randomness-service:v0.1.0-BETA-v14 .
-sudo docker push phantasybot/verifiable-randomness-service:v0.1.0-BETA-v14
+sudo docker build -t phantasybot/verifiable-randomness-service:v0.1.0-BETA-v15 .
+sudo docker push phantasybot/verifiable-randomness-service:v0.1.0-BETA-v15
 
 # 3. Deploy to existing CVM
 cd ~/mystery-gift-deploy
@@ -42,9 +42,8 @@ PAYMENT_WALLET_BASE=0x2d55488AD8dd2671c2F8D08FAad75908afa461c3
 HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY
 BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
 
-# Access control
-WHITELIST=api.mysterygift.fun,vault.mysterygift.fun,agent.mysterygift.fun,tcg.mysterygift.fun,vrf.mysterygift.fun,localhost
-API_KEYS=your-api-key
+# Access control (API key for partners - everyone else pays $0.01 via x402)
+API_KEYS=6d44c71a16450ce80e3bf8dc8a0904e59eaaa3524c8eb31a9f500e5743560b8b
 
 # x402 payment
 X402_FACILITATOR_URL=https://facilitator.payai.network
@@ -53,6 +52,8 @@ X402_FACILITATOR_URL=https://facilitator.payai.network
 CLOUDFLARE_API_TOKEN=your-cloudflare-dns-token
 CERTBOT_EMAIL=hello@mysterygift.fun
 ```
+
+**Important:** v15 removed the whitelist - everyone must pay $0.01 USDC per request via x402 protocol. API key holders get free access.
 
 ## Quick Start
 
