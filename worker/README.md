@@ -2,6 +2,58 @@
 
 A secure randomness generator designed to run inside a **Phala Network TEE (Trusted Execution Environment)**. Provides provably fair random numbers with hardware attestation.
 
+## Deployment (v14 - Current)
+
+**For deploying v14 with custom domain SSL, see [DNS-SETUP.md](./DNS-SETUP.md)**
+
+### Quick Deploy to Phala Cloud
+
+```bash
+# 1. SSH to Hetzner build server
+ssh hetzner-phantasy-001
+
+# 2. Build and push image
+cd ~/mystery-gift-deploy/services/verifiable-randomness-service/worker
+sudo docker build -t phantasybot/verifiable-randomness-service:v0.1.0-BETA-v14 .
+sudo docker push phantasybot/verifiable-randomness-service:v0.1.0-BETA-v14
+
+# 3. Deploy to existing CVM
+cd ~/mystery-gift-deploy
+
+# Deploy prod
+npx phala deploy --cvm-id de014c8e6c862d1d0799ec035e85f93912769f12 \
+  -c services/verifiable-randomness-service/worker/phala-compose.prod-v14.yaml \
+  -e services/verifiable-randomness-service/worker/.env
+
+# Deploy dev
+npx phala deploy --cvm-id 68bfb1758fa20d75cac0af456e9868e4f1cc9e7c \
+  -c services/verifiable-randomness-service/worker/phala-compose.dev-v14.yaml \
+  -e services/verifiable-randomness-service/worker/.env
+```
+
+### Required Environment Variables
+
+```bash
+# Payment wallets
+PAYMENT_WALLET=3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx
+PAYMENT_WALLET_BASE=0x2d55488AD8dd2671c2F8D08FAad75908afa461c3
+
+# RPC URLs
+HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY
+BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
+
+# Access control
+WHITELIST=api.mysterygift.fun,vault.mysterygift.fun,agent.mysterygift.fun,tcg.mysterygift.fun,vrf.mysterygift.fun,localhost
+API_KEYS=your-api-key
+
+# x402 payment
+X402_FACILITATOR_URL=https://facilitator.payai.network
+
+# Custom domain (dstack-ingress handles SSL)
+CLOUDFLARE_API_TOKEN=your-cloudflare-dns-token
+CERTBOT_EMAIL=hello@mysterygift.fun
+```
+
 ## Quick Start
 
 ### Deploy to Phala Cloud
@@ -40,6 +92,38 @@ npm run dev
 - **Whitelist access**: Free access for your own applications
 - **API key authentication**: Free access for authorized partners
 
+## Hybrid Payment Architecture
+
+This service uses a hybrid approach combining x402 protocol with minimal RPC usage:
+
+| Component                | Purpose                                       | RPC Used                          |
+| ------------------------ | --------------------------------------------- | --------------------------------- |
+| **Payment Verification** | Verify user paid via PayAI facilitator        | **None** (handled by facilitator) |
+| **Transaction Building** | Build unsigned tx (get nonce, blockhash, gas) | Helius (Solana), Alchemy (Base)   |
+| **Result Delivery**      | Return randomness + attestation               | **None**                          |
+
+### Why RPC is needed for the Human UI
+
+The browser-based human UI needs RPC endpoints to **build transactions** before the user signs them:
+
+- **Solana**: Get recent blockhash, verify USDC balance
+- **Base**: Get nonce, estimate gas, verify USDC balance
+
+However, **payment verification** (did they actually pay?) is handled entirely by the PayAI facilitator - we don't need our own RPC for that.
+
+### Programmatic Access (No RPC Needed)
+
+For server-to-server API calls, you can use x402 directly:
+
+```bash
+# Get payment requirements
+curl -X POST https://vrf.mysterygift.fun/v1/random/number \
+  -H "Content-Type: application/json" \
+  -d '{"min": 1, "max": 100}'
+
+# Returns 402 with payment instructions - complete payment, then retry with X-Payment header
+```
+
 ## Why TEE over VRF?
 
 | Feature          | TEE Attestation   | On-chain VRF       |
@@ -50,6 +134,33 @@ npm run dev
 | **Trust model**  | Hardware enclave  | Cryptographic      |
 
 TEE is **90%+ cheaper** than VRF while providing similar trust guarantees through hardware-backed attestation.
+
+## Security for Financial Applications
+
+### Why `crypto.randomBytes(32)` is Secure for Financial Use
+
+This service uses Node.js `crypto.randomBytes(32)` running inside an Intel TDX enclave. Here's why it's suitable for financial applications:
+
+| Aspect             | `crypto.randomBytes(32)`                              | `Math.random()`                             |
+| ------------------ | ----------------------------------------------------- | ------------------------------------------- |
+| **Source**         | OS CSPRNG (`/dev/urandom`) seeded by kernel entropy   | Deterministic algorithm (LCG)               |
+| **Predictability** | Cryptographically secure, impossible to predict       | Predictable if seed is known                |
+| **TEE Protection** | Bound to hardware attestation                         | Not applicable                              |
+| **Financial Use**  | ✅ **Approved for NFT drops, gaming, gambling, DeFi** | ❌ **Never use for financial applications** |
+
+The randomness comes from the operating system's kernel entropy pool, which collects randomness from hardware sources (keyboard timing, disk I/O, CPU timing variations, etc.). Inside Intel TDX, this is further protected by hardware isolation - the enclave cannot be accessed even by us (the operators).
+
+### Comparison with On-Chain Solutions
+
+| Feature           | Our TEE + Arweave                  | Chainlink VRF          | Switchboard           |
+| ----------------- | ---------------------------------- | ---------------------- | --------------------- |
+| **Security**      | Intel TDX (hardware enclave)       | On-chain cryptographic | Oracle network        |
+| **Verification**  | Remote attestation + Arweave proof | On-chain verification  | On-chain verification |
+| **Cost**          | $0.01/request                      | $2-50/request          | $0.10-2/request       |
+| **Latency**       | ~500ms                             | ~30s                   | ~15s                  |
+| **Financial Use** | ✅ Yes                             | ✅ Yes                 | ✅ Yes                |
+
+All three are approved for financial applications. Our TEE approach is cheaper and faster, while on-chain solutions offer different trust models.
 
 ## API Endpoints
 
@@ -196,20 +307,20 @@ The server runs in **Simulation Mode** locally (no SGX hardware). Mock attestati
 ## Integration Example
 
 ```typescript
-import crypto from 'crypto';
+import crypto from "crypto";
 
 async function getVerifiedRandomness(raffleId: string): Promise<string> {
   const requestHash = crypto
-    .createHash('sha256')
+    .createHash("sha256")
     .update(raffleId)
     .update(Date.now().toString())
-    .digest('hex');
+    .digest("hex");
 
-  const response = await fetch('https://tee.example.com/v1/randomness', {
-    method: 'POST',
+  const response = await fetch("https://tee.example.com/v1/randomness", {
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key': process.env.TEE_API_KEY!, // Or use x402 payment
+      "Content-Type": "application/json",
+      "X-API-Key": process.env.TEE_API_KEY!, // Or use x402 payment
     },
     body: JSON.stringify({
       request_hash: requestHash,
@@ -235,15 +346,15 @@ async function getVerifiedRandomness(raffleId: string): Promise<string> {
 
 ## Environment Variables
 
-| Variable         | Description                     | Required   |
-| ---------------- | ------------------------------- | ---------- |
-| `PORT`           | Server port (default: 3000)     | No         |
-| `PAYMENT_WALLET` | Solana wallet for x402 payments | Yes        |
-| `WHITELIST`      | Comma-separated allowed origins | No         |
-| `API_KEYS`       | Comma-separated API keys        | No         |
-| `MRENCLAVE`      | Set by TEE environment          | Auto       |
-| `X402_FACILITATOR_URL` | PayAI facilitator URL     | Yes        |
-| `SUPPORTED_NETWORKS` | Payment networks (solana,base) | No         |
+| Variable               | Description                     | Required |
+| ---------------------- | ------------------------------- | -------- |
+| `PORT`                 | Server port (default: 3000)     | No       |
+| `PAYMENT_WALLET`       | Solana wallet for x402 payments | Yes      |
+| `WHITELIST`            | Comma-separated allowed origins | No       |
+| `API_KEYS`             | Comma-separated API keys        | No       |
+| `MRENCLAVE`            | Set by TEE environment          | Auto     |
+| `X402_FACILITATOR_URL` | PayAI facilitator URL           | Yes      |
+| `SUPPORTED_NETWORKS`   | Payment networks (solana,base)  | No       |
 
 ## Verification (Free)
 
@@ -283,6 +394,7 @@ For high-volume public usage (>20 requests/second), use **Horizontal Scaling** b
 ## Security Architecture
 
 1.  **x402 Payment**:
+
     - Client creates payment intent via `/v1/payment/create`.
     - Client completes payment through the PayAI facilitator (Solana or Base).
     - Client includes `paymentId` in `X-Payment` header.
@@ -290,6 +402,7 @@ For high-volume public usage (>20 requests/second), use **Horizontal Scaling** b
     - Replay protection via LRU payment ID cache (10,000 entries, 1h TTL).
 
 2.  **TEE Attestation**:
+
     - Every response includes an Intel TDX Quote.
     - Quote binds the `random_seed` to the hardware enclave.
     - Verifiable via Phala Cloud API or Intel SGX/TDX verification services.
