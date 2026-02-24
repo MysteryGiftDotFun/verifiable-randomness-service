@@ -1,0 +1,27 @@
+services:
+  randomness-prod:
+    image: phantasybot/vrf-service:0.1.0-BETA-v31
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - APP_VERSION=0.1.0-BETA-v31
+      - APP_ENVIRONMENT=production
+      - FREE_MODE=true
+      - PAYMENT_WALLET=3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx
+      - PAYMENT_WALLET_BASE=0x2d55488AD8dd2671c2F8D08FAad75908afa461c3
+      - HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=a9b3f735-5075-44f3-a144-42e39e5f8827
+      - BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/bN0iupijudcLrsJrQ4QXB
+      - API_KEYS=6d44c71a16450ce80e3bf8dc8a0904e59eaaa3524c8eb31a9f500e5743560b8b
+      - X402_FACILITATOR_URL=https://facilitator.payai.network
+      - SUPPORTED_NETWORKS=solana,base
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

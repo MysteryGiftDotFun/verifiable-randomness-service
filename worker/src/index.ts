@@ -3,6 +3,7 @@ import express, { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import cors from "cors";
 import path from "path";
+import { fileURLToPath } from "url";
 import fs from "fs";
 import { DstackClient } from "@phala/dstack-sdk";
 import { Keypair } from "@solana/web3.js";
@@ -10,13 +11,26 @@ import {
   commitToArweave,
   computeCommitmentHash,
   ArweaveCommitmentResult,
-} from "./commitment";
+} from "./commitment.js";
 import { LRUCache } from "lru-cache";
 import Redis from "ioredis";
 import rateLimit from "express-rate-limit";
-import { X402Server } from "x402";
-import type { PaymentRequirements, PaymentPayload } from "x402";
-import { renderLandingPage } from "./landing";
+
+// ESM __dirname equivalent
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// x402 Official packages - ESM imports
+import { paymentMiddleware } from "@x402/express";
+
+import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
+
+import { ExactEvmScheme } from "@x402/evm/exact/server";
+import { ExactSvmScheme } from "@x402/svm/exact/server";
+
+import { facilitator } from "@payai/facilitator";
+
+import { renderLandingPage } from "./landing.js";
 
 const app = express();
 
@@ -70,49 +84,15 @@ const packageJson = JSON.parse(
 );
 const VERSION = packageJson.version;
 
-// x402 Facilitator Configuration
-const X402_FACILITATOR_URL =
-  process.env.X402_FACILITATOR_URL || "https://facilitator.payai.network";
-const SUPPORTED_NETWORKS = (process.env.SUPPORTED_NETWORKS || "solana")
-  .split(",")
-  .map((n) => n.trim())
-  .filter(Boolean);
+// x402 Facilitator Configuration - using official @x402/express middleware
+const facilitatorClient = new HTTPFacilitatorClient(facilitator);
+const x402Server = new x402ResourceServer(facilitatorClient)
+  .register("eip155:8453", new ExactEvmScheme()) // Base mainnet
+  .register("eip155:84532", new ExactEvmScheme()) // Base Sepolia
+  .register("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", new ExactSvmScheme()) // Solana mainnet
+  .register("solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", new ExactSvmScheme()); // Solana devnet
 
-// USDC mint addresses per network
-const USDC_ASSETS: Record<string, string> = {
-  solana: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-  base: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-};
-
-// USDC has 6 decimals; $0.01 = 10000 base units
-const PRICE_BASE_UNITS = "10000";
-
-const x402Server = new X402Server({
-  facilitatorUrl: X402_FACILITATOR_URL,
-});
-
-// Facilitator fee payer for Solana networks (from https://facilitator.payai.network/supported)
-const SOLANA_FEE_PAYER = "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4";
-
-// Build PaymentRequirements for each supported network
-const paymentRequirementsByNetwork: Record<string, PaymentRequirements> = {};
-for (const network of SUPPORTED_NETWORKS) {
-  const paymentWallet =
-    network === "base" ? PAYMENT_WALLET_BASE : PAYMENT_WALLET;
-  paymentRequirementsByNetwork[network] = X402Server.buildPaymentRequirements({
-    network,
-    maxAmountRequired: PRICE_BASE_UNITS,
-    asset: USDC_ASSETS[network] || USDC_ASSETS.solana,
-    payTo: paymentWallet,
-    resource: `https://vrf.mysterygift.fun/v1/randomness`,
-    description: "TEE Randomness Request",
-    maxTimeoutSeconds: 60,
-    // Include facilitator's fee payer for Solana networks
-    extra: network.includes("solana")
-      ? { feePayer: SOLANA_FEE_PAYER }
-      : undefined,
-  });
-}
+const SUPPORTED_NETWORKS = ["solana", "base"];
 
 // TEE deployment info
 let TEE_INFO: {
@@ -128,6 +108,7 @@ let TEE_INFO: {
 
 // Arweave immutable proof configuration
 const ARWEAVE_ENABLED = process.env.ARWEAVE_ENABLED !== "false"; // Enabled by default
+const FREE_MODE = process.env.FREE_MODE === "true"; // Bypass payment for testing
 
 // TEE-derived commitment keypair (for Arweave uploads via Turbo SDK)
 let commitmentKeypair: Keypair | null = null;
@@ -335,7 +316,7 @@ setInterval(() => {
 }, 3600000);
 
 // Log payment configuration on startup
-console.log(`[TEE] x402 facilitator: ${X402_FACILITATOR_URL}`);
+console.log(`[TEE] x402 facilitator: using @payai/facilitator`);
 console.log(`[TEE] Supported networks: ${SUPPORTED_NETWORKS.join(", ")}`);
 
 // dStack Client for Attestation
@@ -402,144 +383,164 @@ const paidLimiter = rateLimit({
 // Apply global rate limiter to all /v1/ routes
 app.use("/v1/", globalLimiter);
 
-/**
- * Middleware: Check authentication and x402 payment
- *
- * x402 protocol flow:
- * 1. No X-PAYMENT header → 402 with PaymentRequirements in `accepts`
- * 2. X-PAYMENT header present → decode, verify via facilitator, run handler, settle
- */
-async function authMiddleware(req: Request, res: Response, next: NextFunction) {
-  const apiKey = req.get("X-API-Key") || req.query.api_key;
+// x402 Payment Middleware using official @x402/express
+// This handles 402 responses, payment verification, and settlement automatically
+app.use(
+  paymentMiddleware(
+    {
+      "POST /v1/randomness": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            payTo: PAYMENT_WALLET,
+          },
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "eip155:8453",
+            payTo: PAYMENT_WALLET_BASE,
+          },
+        ],
+        description: "TEE Randomness Request",
+        mimeType: "application/json",
+      },
+      "POST /v1/random/number": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            payTo: PAYMENT_WALLET,
+          },
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "eip155:8453",
+            payTo: PAYMENT_WALLET_BASE,
+          },
+        ],
+        description: "Random Number Generation",
+        mimeType: "application/json",
+      },
+      "POST /v1/random/pick": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            payTo: PAYMENT_WALLET,
+          },
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "eip155:8453",
+            payTo: PAYMENT_WALLET_BASE,
+          },
+        ],
+        description: "Random Pick from List",
+        mimeType: "application/json",
+      },
+      "POST /v1/random/shuffle": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            payTo: PAYMENT_WALLET,
+          },
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "eip155:8453",
+            payTo: PAYMENT_WALLET_BASE,
+          },
+        ],
+        description: "Random List Shuffle",
+        mimeType: "application/json",
+      },
+      "POST /v1/random/winners": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            payTo: PAYMENT_WALLET,
+          },
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "eip155:8453",
+            payTo: PAYMENT_WALLET_BASE,
+          },
+        ],
+        description: "Random Winner Selection",
+        mimeType: "application/json",
+      },
+      "POST /v1/random/uuid": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            payTo: PAYMENT_WALLET,
+          },
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "eip155:8453",
+            payTo: PAYMENT_WALLET_BASE,
+          },
+        ],
+        description: "UUIDv4 Generation",
+        mimeType: "application/json",
+      },
+      "POST /v1/random/dice": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            payTo: PAYMENT_WALLET,
+          },
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "eip155:8453",
+            payTo: PAYMENT_WALLET_BASE,
+          },
+        ],
+        description: "Dice Roll",
+        mimeType: "application/json",
+      },
+    },
+    x402Server,
+  ),
+);
 
-  // 1. Check API key (free access for authorized partners)
+/**
+ * API Key authentication middleware (bypasses payment)
+ */
+function apiKeyMiddleware(req: Request, res: Response, next: NextFunction) {
+  const apiKey = req.get("X-API-Key") || req.query.api_key;
   if (apiKey && API_KEYS.includes(apiKey as string)) {
     usageStats.apiKeyRequests++;
     (req as any).paymentStatus = "api_key";
     return next();
   }
+  next();
+}
 
-  // 2. Check x402 X-PAYMENT header
-  const paymentHeader = req.get("X-Payment");
-
-  if (!paymentHeader) {
-    // Return standard 402 with PaymentRequirements
-    const accepts = Object.values(paymentRequirementsByNetwork);
-    res.status(402).json({
-      x402Version: 1,
-      error: "X-PAYMENT header is required",
-      accepts,
-    });
-    return;
+/**
+ * Free mode middleware - bypasses payment for testing
+ */
+function freeModeMiddleware(req: Request, res: Response, next: NextFunction) {
+  if (FREE_MODE) {
+    (req as any).paymentStatus = "free_mode";
+    console.log(`[TEE] Free mode enabled - bypassing payment`);
   }
-
-  // 4. Decode and verify x402 payment
-  try {
-    const paymentPayload = X402Server.decodePaymentHeader(paymentHeader);
-
-    if (!paymentPayload) {
-      res.status(402).json({
-        x402Version: 1,
-        error: "Invalid X-PAYMENT header format",
-        accepts: Object.values(paymentRequirementsByNetwork),
-      });
-      return;
-    }
-
-    // Replay protection: hash the payload
-    const payloadHash = crypto
-      .createHash("sha256")
-      .update(paymentHeader)
-      .digest("hex");
-    if (await hasPayloadHash(payloadHash)) {
-      console.warn(
-        `[TEE] Replay attempt detected: ${payloadHash.slice(0, 16)}`,
-      );
-      res.status(402).json({
-        x402Version: 1,
-        error: "Payment payload already used (replay detected)",
-      });
-      return;
-    }
-    await addPayloadHash(payloadHash);
-
-    // Find matching payment requirements for the network
-    const requirements = paymentRequirementsByNetwork[paymentPayload.network];
-    if (!requirements) {
-      await removePayloadHash(payloadHash);
-      res.status(402).json({
-        x402Version: 1,
-        error: `Unsupported network: ${paymentPayload.network}`,
-        accepts: Object.values(paymentRequirementsByNetwork),
-      });
-      return;
-    }
-
-    // Verify payment with facilitator
-    const verification = await x402Server.verify(paymentPayload, requirements);
-
-    if (!verification.isValid) {
-      await removePayloadHash(payloadHash);
-      console.warn(`[TEE] Payment invalid: ${verification.invalidReason}`);
-      res.status(402).json({
-        x402Version: 1,
-        error: "Payment verification failed",
-        reason: verification.invalidReason,
-      });
-      return;
-    }
-
-    console.log(
-      `[TEE] Payment verified from ${verification.payer} on ${paymentPayload.network}`,
-    );
-
-    // Store payment context for post-handler settlement
-    (req as any).paymentStatus = "paid";
-    (req as any).x402PaymentPayload = paymentPayload;
-    (req as any).x402PaymentRequirements = requirements;
-    (req as any).x402Payer = verification.payer;
-
-    usageStats.paidRequests++;
-    usageStats.totalRevenueCents += PRICE_PER_REQUEST_CENTS;
-
-    // Intercept res.json to settle payment after handler completes
-    const originalJson = res.json.bind(res);
-    res.json = function (body: any) {
-      // Settle payment in background (don't block the response)
-      x402Server
-        .settle(paymentPayload, requirements)
-        .then((settlement) => {
-          if (settlement.success) {
-            console.log(`[TEE] Payment settled: tx=${settlement.transaction}`);
-          } else {
-            console.error(`[TEE] Settlement failed: ${settlement.errorReason}`);
-          }
-        })
-        .catch((err) => {
-          console.error(`[TEE] Settlement error:`, err);
-        });
-
-      // Add X-PAYMENT-RESPONSE header with settlement info
-      res.set(
-        "X-PAYMENT-RESPONSE",
-        Buffer.from(
-          JSON.stringify({
-            x402Version: 1,
-            scheme: paymentPayload.scheme,
-            network: paymentPayload.network,
-            payer: verification.payer,
-          }),
-        ).toString("base64"),
-      );
-
-      return originalJson(body);
-    } as any;
-
-    next();
-  } catch (error) {
-    console.error("[TEE] Payment verification error:", error);
-    res.status(500).json({ error: "Payment verification failed" });
-  }
+  next();
 }
 
 /**
@@ -549,7 +550,8 @@ async function authMiddleware(req: Request, res: Response, next: NextFunction) {
 app.post(
   "/v1/randomness",
   paidLimiter,
-  authMiddleware,
+  freeModeMiddleware,
+  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { request_hash, metadata } = req.body;
@@ -602,7 +604,7 @@ app.post(
 app.post(
   "/v1/random/number",
   paidLimiter,
-  authMiddleware,
+  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { min = 1, max, request_hash } = req.body;
@@ -669,7 +671,7 @@ app.post(
 app.post(
   "/v1/random/pick",
   paidLimiter,
-  authMiddleware,
+  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { items, request_hash } = req.body;
@@ -734,7 +736,7 @@ app.post(
 app.post(
   "/v1/random/shuffle",
   paidLimiter,
-  authMiddleware,
+  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { items, request_hash } = req.body;
@@ -807,7 +809,7 @@ app.post(
 app.post(
   "/v1/random/winners",
   paidLimiter,
-  authMiddleware,
+  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { items, count = 1, request_hash } = req.body;
@@ -908,7 +910,7 @@ app.post(
 app.post(
   "/v1/random/uuid",
   paidLimiter,
-  authMiddleware,
+  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { request_hash } = req.body;
@@ -964,7 +966,7 @@ app.post(
 app.post(
   "/v1/random/dice",
   paidLimiter,
-  authMiddleware,
+  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { dice, request_hash } = req.body;
@@ -1111,7 +1113,7 @@ app.get("/", (_req: Request, res: Response) => {
     paymentWalletBase: PAYMENT_WALLET_BASE,
     heliusRpcUrl,
     baseRpcUrl,
-    facilitatorUrl: X402_FACILITATOR_URL,
+    facilitatorUrl: "https://facilitator.payai.network",
     supportedNetworks: SUPPORTED_NETWORKS,
     arweaveEnabled: ARWEAVE_ENABLED,
     appId,
@@ -1775,8 +1777,28 @@ async function start() {
     console.error("=".repeat(80));
   }
 
-  // Serve static files
-  app.use("/assets", express.static(path.join(__dirname, "../static")));
+  // Serve static files from /app/static
+  const staticPath = "/app/static";
+  console.log(`[TEE] Serving static from: ${staticPath}`);
+  app.use("/assets", express.static(staticPath));
+  app.use("/static", express.static(staticPath));
+  // Also try /app/dist for landing-client.js
+  app.use(express.static("/app/dist"));
+  // Root fallback
+  app.use(express.static(staticPath));
+
+  // Explicit route for landing-client.js - read from known absolute path
+  app.get("/landing-client.js", (req, res) => {
+    const fs = require("fs");
+    const filePath = "/app/dist/landing-client.js";
+
+    if (fs.existsSync(filePath)) {
+      res.setHeader("Content-Type", "application/javascript");
+      res.send(fs.readFileSync(filePath, "utf-8"));
+    } else {
+      res.status(404).send("Not found");
+    }
+  });
 
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`[TEE] Randomness Worker v2.8 running on port ${PORT}`);

@@ -513,11 +513,57 @@ async function generate() {
 
     log("Requesting " + opType + "...");
 
-    const response = await fetch(endpoint, {
+    let response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+
+    // Handle x402 payment required
+    if (response.status === 402) {
+      const paymentHeader = response.headers.get("payment-required");
+      if (paymentHeader) {
+        log("Payment required, processing...", "info");
+
+        const paymentRequirements = JSON.parse(atob(paymentHeader));
+
+        // Find matching payment method based on selected network
+        const accept = paymentRequirements.accepts.find(
+          (a) =>
+            (selectedNetwork === "solana" && a.network.startsWith("solana:")) ||
+            (selectedNetwork === "base" && a.network.startsWith("eip155:")),
+        );
+
+        if (!accept) {
+          throw new Error(
+            "No compatible payment method found for " + selectedNetwork,
+          );
+        }
+
+        let payment;
+        if (selectedNetwork === "solana") {
+          // Use spl-token for Solana
+          payment = await createSolanaPayment(accept, body);
+        } else if (selectedNetwork === "base") {
+          // Use x402 for EVM
+          payment = await X402EVM.createPaymentPayload(
+            window.ethereum,
+            accept.network,
+            accept,
+          );
+        }
+
+        // Retry with payment
+        response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Payment": JSON.stringify(payment),
+          },
+          body: JSON.stringify(body),
+        });
+      }
+    }
 
     if (!response.ok) {
       const err = await response.json();
@@ -539,6 +585,64 @@ async function generate() {
     const genBtn = document.getElementById("gen-btn");
     if (genBtn) genBtn.disabled = false;
   }
+}
+
+// Create Solana payment using spl-token
+async function createSolanaPayment(paymentReq, body) {
+  const { Connection, PublicKey, Transaction } = solanaWeb3;
+
+  // Get the payment asset (USDC)
+  const usdcMint = new PublicKey(paymentReq.asset);
+  const paymentWallet = new PublicKey(paymentReq.payTo);
+
+  // Get sender's token account
+  const senderATA = await splToken.getAssociatedTokenAddress(usdcMint, wallet);
+
+  // Get sender's token account balance
+  const connection = new Connection(HELIUS_RPC_URL, "confirmed");
+  let senderAccount;
+  try {
+    senderAccount = await splToken.getAccount(connection, senderATA);
+  } catch (e) {
+    // Account doesn't exist, create it
+    throw new Error(
+      "No USDC token account found. Please ensure you have USDC.",
+    );
+  }
+
+  // Create transfer instruction
+  const amount = BigInt(paymentReq.amount);
+  const transferIx = splToken.createTransferCheckedInstruction(
+    senderATA,
+    usdcMint,
+    paymentWallet,
+    wallet,
+    amount,
+    6, // USDC has 6 decimals
+  );
+
+  // Build and sign transaction
+  const transaction = new Transaction().add(transferIx);
+  transaction.feePayer = wallet;
+  transaction.recentBlockhash = (
+    await connection.getLatestBlockhash()
+  ).blockhash;
+
+  // Sign with Phantom/Solflare
+  const signedTx = await window.solana.signTransaction(transaction);
+
+  // Serialize
+  const serialized = signedTx.serialize();
+
+  return {
+    scheme: "exact",
+    network: paymentReq.network,
+    amount: paymentReq.amount,
+    asset: paymentReq.asset,
+    payload: {
+      transaction: Buffer.from(serialized).toString("base64"),
+    },
+  };
 }
 
 // Verify (called from onclick in HTML)
