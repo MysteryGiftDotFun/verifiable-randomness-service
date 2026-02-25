@@ -941,7 +941,7 @@ async function generate() {
 
 // Create Solana payment using spl-token
 async function createSolanaPayment(paymentReq, body) {
-  const { Connection, PublicKey, Transaction, ComputeBudgetProgram } =
+  const { Connection, PublicKey, Transaction, TransactionInstruction } =
     solanaWeb3;
 
   // Convert wallet string to PublicKey
@@ -988,14 +988,46 @@ async function createSolanaPayment(paymentReq, body) {
   }
 
   // CRITICAL: x402-svm requires compute budget instructions as first two instructions
-  // Instruction 0: SetComputeUnitLimit
-  // Instruction 1: SetComputeUnitPrice
-  // Instruction 2: TransferChecked
-  // NOTE: microLamports must be BigInt for proper encoding
+  // Must be manually created for browser compatibility (ComputeBudgetProgram uses Node.js Buffer)
+  // SetComputeUnitLimit: discriminator 0x02, 4-byte LE units (max 60000)
+  // SetComputeUnitPrice: discriminator 0x03, 8-byte LE microLamports (max 5)
+  const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey(
+    "ComputeBudget111111111111111111111111111111",
+  );
+
+  // SetComputeUnitLimit: [0x02][4-byte LE units]
+  const computeUnits = 20000; // Must be <= 60000 (MAX_COMPUTE_UNIT_LIMIT)
+  const computeLimitData = new Uint8Array(5);
+  computeLimitData[0] = 0x02; // SetComputeUnitLimit discriminator
+  computeLimitData[1] = computeUnits & 0xff;
+  computeLimitData[2] = (computeUnits >> 8) & 0xff;
+  computeLimitData[3] = (computeUnits >> 16) & 0xff;
+  computeLimitData[4] = (computeUnits >> 24) & 0xff;
+
+  // SetComputeUnitPrice: [0x03][8-byte LE microLamports]
+  const microLamports = BigInt(1); // Must be <= 5 (MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS)
+  const computePriceData = new Uint8Array(9);
+  computePriceData[0] = 0x03; // SetComputeUnitPrice discriminator
+  for (let i = 0; i < 8; i++) {
+    computePriceData[1 + i] = Number(
+      (microLamports >> BigInt(i * 8)) & BigInt(0xff),
+    );
+  }
+
   const transaction = new Transaction()
-    .add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200000 }))
     .add(
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: BigInt(1000) }),
+      new TransactionInstruction({
+        keys: [],
+        programId: COMPUTE_BUDGET_PROGRAM_ID,
+        data: computeLimitData,
+      }),
+    )
+    .add(
+      new TransactionInstruction({
+        keys: [],
+        programId: COMPUTE_BUDGET_PROGRAM_ID,
+        data: computePriceData,
+      }),
     )
     .add(transferIx);
 
