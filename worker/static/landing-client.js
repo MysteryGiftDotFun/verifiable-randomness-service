@@ -7,6 +7,80 @@
  */
 
 // ============================================================================
+// Buffer Polyfill for Browser (required by @solana/web3.js internal usage)
+// ============================================================================
+(function () {
+  if (typeof window !== "undefined" && typeof window.Buffer === "undefined") {
+    // Simple but complete Buffer polyfill for @solana/web3.js
+    const _Buffer = function Buffer(arg, encoding) {
+      if (typeof arg === "number") {
+        return new Uint8Array(arg);
+      }
+      if (typeof arg === "string") {
+        if (encoding === "base64") {
+          const binary = atob(arg);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          return bytes;
+        }
+        return new TextEncoder().encode(arg);
+      }
+      if (arg instanceof Uint8Array) {
+        return arg;
+      }
+      return new Uint8Array(arg);
+    };
+
+    _Buffer.from = function (arg, encoding) {
+      return _Buffer(arg, encoding);
+    };
+
+    _Buffer.alloc = function (size) {
+      return new Uint8Array(size);
+    };
+
+    _Buffer.isBuffer = function (obj) {
+      return obj instanceof Uint8Array;
+    };
+
+    Uint8Array.prototype.toString = function (encoding) {
+      if (encoding === "base64") {
+        let binary = "";
+        for (let i = 0; i < this.length; i++) {
+          binary += String.fromCharCode(this[i]);
+        }
+        return btoa(binary);
+      }
+      return new TextDecoder().decode(this);
+    };
+
+    Uint8Array.prototype.equals = function (other) {
+      if (this.length !== other.length) return false;
+      for (let i = 0; i < this.length; i++) {
+        if (this[i] !== other[i]) return false;
+      }
+      return true;
+    };
+
+    Uint8Array.prototype.compare = function (other) {
+      for (let i = 0; i < Math.min(this.length, other.length); i++) {
+        if (this[i] < other[i]) return -1;
+        if (this[i] > other[i]) return 1;
+      }
+      return this.length - other.length;
+    };
+
+    Uint8Array.prototype.slice = function (start, end) {
+      return new Uint8Array(Array.from(this).slice(start, end));
+    };
+
+    window.Buffer = _Buffer;
+  }
+})();
+
+// ============================================================================
 // SPL Token Helpers (from lines 67-145 of original landing.ts)
 // ============================================================================
 
@@ -20,11 +94,14 @@ const splToken = {
     // Handle both string and PublicKey inputs
     const ownerKey = typeof owner === "string" ? new PublicKey(owner) : owner;
     const mintKey = typeof mint === "string" ? new PublicKey(mint) : mint;
+    // Use toBytes() for browser compatibility (toBuffer() requires Node.js Buffer)
     const [address] = await PublicKey.findProgramAddress(
       [
-        ownerKey.toBuffer(),
-        new PublicKey(SPL_TOKEN_PROGRAM_ID).toBuffer(),
-        mintKey.toBuffer(),
+        ownerKey.toBytes ? ownerKey.toBytes() : ownerKey.toBuffer(),
+        new PublicKey(SPL_TOKEN_PROGRAM_ID).toBytes
+          ? new PublicKey(SPL_TOKEN_PROGRAM_ID).toBytes()
+          : new PublicKey(SPL_TOKEN_PROGRAM_ID).toBuffer(),
+        mintKey.toBytes ? mintKey.toBytes() : mintKey.toBuffer(),
       ],
       new PublicKey(ASSOCIATED_TOKEN_PROGRAM_ID),
     );
