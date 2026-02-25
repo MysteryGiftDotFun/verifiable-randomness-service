@@ -29,17 +29,8 @@ Detailed API reference for the Verifiable Randomness Service.
 
 ### Priority Order
 
-1. **Whitelist** (highest priority) - Free access
-2. **API Key** - Free access for partners
-3. **x402 Payment** - $0.01 per request
-
-### Whitelist
-
-Add your origin or IP to the `WHITELIST` environment variable:
-
-```bash
-WHITELIST=mysterygift.fun,your-app.com,192.168.1.100
-```
+1. **API Key** (highest priority) - Free access for partners
+2. **x402 Payment** - $0.01 per request
 
 ### API Key
 
@@ -53,6 +44,8 @@ X-API-Key: your-secret-key
 
 ## Testing x402 Payments
 
+**See [X402-INTEGRATION.md](./X402-INTEGRATION.md) for complete implementation details.**
+
 ### Option 1: Human UI (Browser)
 
 1. Visit https://vrf.mysterygift.fun
@@ -61,7 +54,7 @@ X-API-Key: your-secret-key
 4. Click "Generate Randomness"
 5. Approve the transaction in your wallet
 
-### Option 2: Programmatic (curl)
+### Option 2: Programmatic Access
 
 #### Step 1: Get Payment Requirements
 
@@ -71,73 +64,92 @@ curl -X POST https://vrf.mysterygift.fun/v1/random/number \
   -d '{"min": 1, "max": 100}'
 ```
 
-Returns **402 Payment Required** with instructions:
+Returns **402 Payment Required** with `PAYMENT-REQUIRED` header (base64-encoded):
 
 ```json
 {
-  "error": "Payment Required",
-  "x402": {
-    "scheme": "exact",
-    "network": "solana",
-    "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    "payTo": "3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx",
-    "maxAmountRequired": "10000"
-  }
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+      "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "payTo": "3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx",
+      "amount": "10000",
+      "maxTimeoutSeconds": 300,
+      "extra": {
+        "feePayer": "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "payTo": "0x2d55488AD8dd2671c2F8D08FAad75908afa461c3",
+      "amount": "10000",
+      "maxTimeoutSeconds": 300
+    }
+  ]
 }
 ```
 
-#### Step 2: Complete Payment
+#### Step 2: Build and Sign Payment
 
-Pay $0.01 USDC to the `payTo` address using your wallet.
+**For Solana:**
 
-#### Step 3: Retry with Payment Proof
+1. Build unsigned transaction with transfer instruction
+2. Add compute budget instructions (must be first)
+3. Set facilitator's `feePayer` as transaction feePayer
+4. Sign with user's wallet
+5. Serialize with `requireAllSignatures: false`
+
+**For Base:**
+
+1. Build EIP-712 typed data for EIP-3009 TransferWithAuthorization
+2. Sign with MetaMask via `eth_signTypedData_v4`
+
+#### Step 3: Submit with Payment
 
 ```bash
-# Build X-Payment header with transaction proof
-# For Solana: include signed transaction (base64)
-# For Base: include transaction hash (hex)
-
 curl -X POST https://vrf.mysterygift.fun/v1/random/number \
   -H "Content-Type: application/json" \
-  -H "X-Payment: eyJ4MDAyIjogMSwgInNjaGVtZSI6ICJleGFjdCIsICJuZXR3b3JrIjogInNvbGFuYSIsICJwYXlsb2FkIjogeyJ0cmFuc2FjdGlvbiI6ICIuLi4ifX0=" \
+  -H "PAYMENT-SIGNATURE: <base64-encoded-payment-payload>" \
   -d '{"min": 1, "max": 100}'
 ```
 
-### Option 3: Whitelist (Free)
-
-Add your domain to `WHITELIST` - requests from whitelisted origins are free.
-
----
-
-### RPC Requirements (Hybrid Architecture)
-
-This service uses a **hybrid architecture**:
-
-| Component            | RPC Used                        | Why                                               |
-| -------------------- | ------------------------------- | ------------------------------------------------- |
-| Payment Verification | **None**                        | PayAI facilitator handles on-chain verification   |
-| Transaction Building | Helius (Solana), Alchemy (Base) | Frontend needs RPC to build unsigned transactions |
-| Result Delivery      | **None**                        | Randomness returned directly                      |
-
-For **server-to-server** API calls, you only need the payment step above - no RPC required from your infrastructure.
-
-### x402 Payment
-
-1. Create a payment intent via `POST /v1/payment/create` (specify `network`: `solana` or `base`)
-2. Complete payment through the facilitator payment URL
-3. Include proof in header:
-
-```http
-X-Payment: x402 eyJwYXltZW50SWQiOiJwYXlfYWJjMTIzIn0=
-```
-
-**Proof structure** (before base64 encoding):
+The `PAYMENT-SIGNATURE` header contains a base64-encoded JSON object:
 
 ```json
 {
-  "paymentId": "pay_abc123..."
+  "x402Version": 2,
+  "resource": { "url": "...", "description": "...", "mimeType": "..." },
+  "accepted": { "scheme": "exact", "network": "...", ... },
+  "payload": { "transaction": "..." }  // or { "signature": "...", "authorization": {...} }
 }
 ```
+
+### Option 3: API Key (Free Access)
+
+```bash
+curl -X POST https://vrf.mysterygift.fun/v1/random/number \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-key" \
+  -d '{"min": 1, "max": 100}'
+```
+
+---
+
+### RPC Requirements
+
+This service uses x402 v2 with PayAI's hosted facilitator:
+
+| Component           | RPC Required | Why                                     |
+| ------------------- | ------------ | --------------------------------------- |
+| Server (payment)    | **No**       | PayAI facilitator handles verification  |
+| Server (randomness) | **No**       | Uses `crypto.randomBytes(32)`           |
+| Client (Solana)     | **Yes**      | Build unsigned tx (blockhash, accounts) |
+| Client (Base)       | **No**       | MetaMask handles everything             |
+
+For **server-to-server** API calls, build transactions externally - no RPC needed on your infrastructure.
 
 ---
 
@@ -221,7 +233,7 @@ X-Payment: x402 eyJwYXltZW50SWQiOiJwYXlfYWJjMTIzIn0=
 
 Generate a 256-bit cryptographically secure random seed.
 
-**Authentication**: Required  
+**Authentication**: Required (API Key or x402 Payment)  
 **Rate Limit**: 20/min
 
 #### Request
@@ -230,7 +242,7 @@ Generate a 256-bit cryptographically secure random seed.
 POST /v1/randomness HTTP/1.1
 Host: vrf.mysterygift.fun
 Content-Type: application/json
-X-Payment: x402 <base64-proof>
+PAYMENT-SIGNATURE: <base64-encoded-x402-payload>
 
 {
   "request_hash": "optional-identifier",
@@ -385,14 +397,14 @@ Roll dice using standard notation (e.g., "2d6", "1d20").
 #### Examples
 
 ```bash
-# Roll 3d6
-curl -X POST https://vrf.mysterygift.fun/v1/random/dice \
-  -H "X-Payment: x402 <proof>" \
-  -d '{"dice": "3d6"}'
-
-# Roll d20
+# Roll 3d6 with API key
 curl -X POST https://vrf.mysterygift.fun/v1/random/dice \
   -H "X-API-Key: <key>" \
+  -d '{"dice": "3d6"}'
+
+# Roll d20 with x402 payment
+curl -X POST https://vrf.mysterygift.fun/v1/random/dice \
+  -H "PAYMENT-SIGNATURE: <base64-payload>" \
   -d '{"dice": "1d20"}'
 ```
 
@@ -601,13 +613,13 @@ Health check endpoint.
 ### JavaScript/TypeScript
 
 ```typescript
-// Using fetch API
+// Using fetch API with x402 payment
 async function getRandomNumber(min: number, max: number) {
   const response = await fetch("https://vrf.mysterygift.fun/v1/random/number", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Payment": `x402 ${btoa(JSON.stringify(paymentProof))}`,
+      "PAYMENT-SIGNATURE": btoa(JSON.stringify(paymentPayload)),
     },
     body: JSON.stringify({ min, max }),
   });
@@ -621,6 +633,24 @@ async function getRandomNumber(min: number, max: number) {
 
   const data = await response.json();
   return data.number;
+}
+
+// Usage with API key (free access)
+async function getRandomNumberWithApiKey(
+  min: number,
+  max: number,
+  apiKey: string,
+) {
+  const response = await fetch("https://vrf.mysterygift.fun/v1/random/number", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": apiKey,
+    },
+    body: JSON.stringify({ min, max }),
+  });
+
+  return response.json();
 }
 
 // Usage
@@ -663,15 +693,21 @@ for winner in winners:
 ### cURL
 
 ```bash
-# Random number
+# Random number with API key
 curl -X POST https://vrf.mysterygift.fun/v1/random/number \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-secret-key" \
   -d '{"min": 1, "max": 100}'
 
+# Random number with x402 payment
+curl -X POST https://vrf.mysterygift.fun/v1/random/number \
+  -H "Content-Type: application/json" \
+  -H "PAYMENT-SIGNATURE: <base64-encoded-payload>" \
+  -d '{"min": 1, "max": 100}'
+
 # Roll dice
 curl -X POST https://vrf.mysterygift.fun/v1/random/dice \
-  -H "X-Payment: x402 <proof>" \
+  -H "X-API-Key: your-secret-key" \
   -d '{"dice": "2d20"}'
 
 # Health check
@@ -702,25 +738,27 @@ if (attestation.type === "tdx-attestation") {
 
 ## Best Practices
 
-### 1. Create Payment, Then Use
+### 1. Build Payment Externally for Server-to-Server
 
-Each payment ID is single-use. Create a new payment intent for each request:
+For programmatic access, build and sign the payment transaction externally:
 
 ```javascript
-// 1. Create payment intent
-const { paymentId, paymentUrl } = await fetch("/v1/payment/create", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ network: "solana" }),
-}).then((r) => r.json());
+// Solana: Build tx externally, sign with your keypair
+// Base: Sign EIP-712 typed data with your private key
 
-// 2. Complete payment via paymentUrl (facilitator handles on-chain tx)
+const paymentPayload = {
+  x402Version: 2,
+  resource: { url: "https://vrf.mysterygift.fun/v1/randomness", ... },
+  accepted: { scheme: "exact", network: "...", ... },
+  payload: { transaction: "..." }  // or { signature: "...", authorization: {...} }
+};
 
-// 3. Use paymentId in proof
-const proof = btoa(JSON.stringify({ paymentId }));
-const result = await fetch("/v1/randomness", {
+const result = await fetch("https://vrf.mysterygift.fun/v1/randomness", {
   method: "POST",
-  headers: { "X-Payment": `x402 ${proof}`, "Content-Type": "application/json" },
+  headers: {
+    "Content-Type": "application/json",
+    "PAYMENT-SIGNATURE": btoa(JSON.stringify(paymentPayload)),
+  },
   body: JSON.stringify({ request_hash: "my-request" }),
 }).then((r) => r.json());
 ```

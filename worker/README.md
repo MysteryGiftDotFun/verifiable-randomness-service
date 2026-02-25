@@ -38,7 +38,7 @@ npx phala deploy --cvm-id 68bfb1758fa20d75cac0af456e9868e4f1cc9e7c \
 PAYMENT_WALLET=3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx
 PAYMENT_WALLET_BASE=0x2d55488AD8dd2671c2F8D08FAad75908afa461c3
 
-# RPC URLs
+# RPC URLs (client-side only - passed to landing page for tx building)
 HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY
 BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
 
@@ -186,28 +186,37 @@ git clone git@github.com-lite:MysteryGiftDotFun/verifiable-randomness-service.gi
 - **Whitelist access**: Free access for your own applications
 - **API key authentication**: Free access for authorized partners
 
-## Hybrid Payment Architecture
+## x402 v2 Payment Architecture
 
-This service uses a hybrid approach combining x402 protocol with minimal RPC usage:
+**See [X402-INTEGRATION.md](../X402-INTEGRATION.md) for complete implementation details.**
 
-| Component                | Purpose                                       | RPC Used                          |
-| ------------------------ | --------------------------------------------- | --------------------------------- |
-| **Payment Verification** | Verify user paid via PayAI facilitator        | **None** (handled by facilitator) |
-| **Transaction Building** | Build unsigned tx (get nonce, blockhash, gas) | Helius (Solana), Alchemy (Base)   |
-| **Result Delivery**      | Return randomness + attestation               | **None**                          |
+This service uses x402 v2 protocol with PayAI's hosted facilitator:
 
-### Why RPC is needed for the Human UI
+| Component               | Purpose                                     | RPC Required?                      |
+| ----------------------- | ------------------------------------------- | ---------------------------------- |
+| **Server (payment)**    | Verify user paid via PayAI facilitator      | **No** (handled by facilitator)    |
+| **Server (randomness)** | Generate random seed + attestation          | **No** (uses `crypto.randomBytes`) |
+| **Client (Solana)**     | Build unsigned tx (blockhash, account info) | **Yes** (Helius)                   |
+| **Client (Base)**       | MetaMask handles everything                 | **No**                             |
 
-The browser-based human UI needs RPC endpoints to **build transactions** before the user signs them:
+### Server-Side: NO RPC Required
 
-- **Solana**: Get recent blockhash, verify USDC balance
-- **Base**: Get nonce, estimate gas, verify USDC balance
+The server **never** makes RPC calls. All payment verification is handled by the PayAI facilitator, and randomness generation uses Node.js `crypto.randomBytes(32)`.
 
-However, **payment verification** (did they actually pay?) is handled entirely by the PayAI facilitator - we don't need our own RPC for that.
+The `HELIUS_RPC_URL` and `BASE_RPC_URL` environment variables are **only passed to the landing page** for client-side transaction building.
+
+### Client-Side: RPC Only for Solana
+
+The browser-based human UI needs RPC only for **Solana payments**:
+
+- `getLatestBlockhash()` - Transaction validity
+- `getAccountInfo()` - Verify USDC token account exists
+
+**Base payments require no RPC** - MetaMask handles everything via `eth_signTypedData_v4`.
 
 ### Programmatic Access (No RPC Needed)
 
-For server-to-server API calls, you can use x402 directly:
+For server-to-server API calls, build and sign transactions externally, then submit via x402:
 
 ```bash
 # Get payment requirements
@@ -440,15 +449,18 @@ async function getVerifiedRandomness(raffleId: string): Promise<string> {
 
 ## Environment Variables
 
-| Variable               | Description                     | Required |
-| ---------------------- | ------------------------------- | -------- |
-| `PORT`                 | Server port (default: 3000)     | No       |
-| `PAYMENT_WALLET`       | Solana wallet for x402 payments | Yes      |
-| `WHITELIST`            | Comma-separated allowed origins | No       |
-| `API_KEYS`             | Comma-separated API keys        | No       |
-| `MRENCLAVE`            | Set by TEE environment          | Auto     |
-| `X402_FACILITATOR_URL` | PayAI facilitator URL           | Yes      |
-| `SUPPORTED_NETWORKS`   | Payment networks (solana,base)  | No       |
+| Variable               | Description                               | Required | Server RPC? |
+| ---------------------- | ----------------------------------------- | -------- | ----------- |
+| `PORT`                 | Server port (default: 3000)               | No       | N/A         |
+| `PAYMENT_WALLET`       | Solana wallet for x402 payments           | Yes      | N/A         |
+| `PAYMENT_WALLET_BASE`  | Base wallet for x402 payments             | Yes      | N/A         |
+| `HELIUS_RPC_URL`       | Solana RPC (client-side tx building only) | No\*     | **No**      |
+| `BASE_RPC_URL`         | Base RPC (client-side tx building only)   | No\*     | **No**      |
+| `API_KEYS`             | Comma-separated API keys                  | No       | N/A         |
+| `X402_FACILITATOR_URL` | PayAI facilitator URL                     | Yes      | N/A         |
+| `SUPPORTED_NETWORKS`   | Payment networks (solana,base)            | No       | N/A         |
+
+\*Required for landing page UI if users need to build Solana transactions in browser.
 
 ## Verification (Free)
 

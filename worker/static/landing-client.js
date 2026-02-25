@@ -534,10 +534,14 @@ document.addEventListener("DOMContentLoaded", () => {
       const inputsNumber = document.getElementById("inputs-number");
       const inputsDice = document.getElementById("inputs-dice");
       const inputsPick = document.getElementById("inputs-pick");
+      const inputsShuffle = document.getElementById("inputs-shuffle");
+      const inputsWinners = document.getElementById("inputs-winners");
 
       if (inputsNumber) inputsNumber.style.display = "none";
       if (inputsDice) inputsDice.style.display = "none";
       if (inputsPick) inputsPick.style.display = "none";
+      if (inputsShuffle) inputsShuffle.style.display = "none";
+      if (inputsWinners) inputsWinners.style.display = "none";
 
       if (value === "number" && inputsNumber) {
         inputsNumber.style.display = "block";
@@ -545,6 +549,10 @@ document.addEventListener("DOMContentLoaded", () => {
         inputsDice.style.display = "block";
       } else if (value === "pick" && inputsPick) {
         inputsPick.style.display = "block";
+      } else if (value === "shuffle" && inputsShuffle) {
+        inputsShuffle.style.display = "block";
+      } else if (value === "winners" && inputsWinners) {
+        inputsWinners.style.display = "block";
       }
     });
   });
@@ -782,8 +790,8 @@ async function generate() {
       body = { min, max };
     } else if (opType === "dice") {
       endpoint = "/v1/random/dice";
-      const format = document.getElementById("in-dice")?.value || "2d6";
-      body = { format };
+      const dice = document.getElementById("in-dice")?.value || "2d6";
+      body = { dice };
     } else if (opType === "pick") {
       endpoint = "/v1/random/pick";
       const itemsStr = document.getElementById("in-items")?.value || "";
@@ -792,9 +800,44 @@ async function generate() {
         .map((s) => s.trim())
         .filter((s) => s);
       body = { items };
+    } else if (opType === "shuffle") {
+      endpoint = "/v1/random/shuffle";
+      const itemsStr =
+        document.getElementById("in-shuffle-items")?.value ||
+        document.getElementById("in-items")?.value ||
+        "";
+      const items = itemsStr
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s);
+      body = { items };
+    } else if (opType === "uuid") {
+      endpoint = "/v1/random/uuid";
+      body = {};
+    } else if (opType === "winners") {
+      endpoint = "/v1/random/winners";
+      const itemsStr =
+        document.getElementById("in-winners-items")?.value ||
+        document.getElementById("in-items")?.value ||
+        "";
+      const items = itemsStr
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s);
+      const count = parseInt(document.getElementById("in-count")?.value) || 1;
+      body = { items, count };
     }
 
-    log("Requesting " + opType + "...");
+    const opLabels = {
+      randomness: "randomness",
+      number: "random number",
+      dice: "dice roll",
+      pick: "winner selection",
+      shuffle: "shuffle",
+      uuid: "UUID",
+      winners: "winners selection",
+    };
+    log("Requesting " + (opLabels[opType] || opType) + "...");
 
     let response = await fetch(endpoint, {
       method: "POST",
@@ -923,7 +966,16 @@ async function generate() {
     }
 
     const data = await response.json();
-    log("Randomness generated!", "success");
+    const successLabels = {
+      randomness: "Randomness generated!",
+      number: "Number generated!",
+      dice: "Dice rolled!",
+      pick: "Winner selected!",
+      shuffle: "List shuffled!",
+      uuid: "UUID generated!",
+      winners: "Winners selected!",
+    };
+    log(successLabels[opType] || "Operation complete!", "success");
 
     // Show result
     showReceipt({
@@ -1089,15 +1141,23 @@ async function verify() {
     const response = await fetch("/v1/attestation");
     const data = await response.json();
 
-    if (data.attestation) {
+    // Check for valid attestation data (quote_hex or verified flag)
+    if (data.quote_hex || data.verified === true) {
       log("Attestation verified!", "success");
       if (verifyRes) {
         verifyRes.style.display = "block";
         verifyRes.innerHTML =
           '<span style="color:var(--success)">✓ Hardware attestation is valid</span>';
       }
+    } else if (data.tee_type === "simulation") {
+      log("Running in simulation mode", "info");
+      if (verifyRes) {
+        verifyRes.style.display = "block";
+        verifyRes.innerHTML =
+          '<span style="color:var(--text-muted)">⚠ Simulation mode - no hardware attestation</span>';
+      }
     } else {
-      throw new Error("No attestation data");
+      throw new Error("No attestation data available");
     }
   } catch (e) {
     log("Verification failed: " + e.message, "error");
@@ -1116,8 +1176,21 @@ async function downloadAttestation() {
     const response = await fetch("/v1/attestation");
     const data = await response.json();
 
-    if (data.attestation) {
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
+    // Include all relevant attestation data
+    const attestationData = {
+      tee_type: data.tee_type,
+      verified: data.verified,
+      app_id: data.app_id,
+      compose_hash: data.compose_hash,
+      instance_id: data.instance_id,
+      quote_hex: data.quote_hex,
+      event_log: data.event_log,
+      verification: data.verification,
+      timestamp: new Date().toISOString(),
+    };
+
+    if (data.quote_hex || data.verified) {
+      const blob = new Blob([JSON.stringify(attestationData, null, 2)], {
         type: "application/json",
       });
       const url = URL.createObjectURL(blob);
@@ -1148,8 +1221,60 @@ function showReceipt(data) {
   if (!overlay || !content) return;
 
   let resultHtml = "";
-  if (data.result?.value) {
-    resultHtml = `<div class="receipt-result">${data.result.value}</div>`;
+  const opType = data.operation || "randomness";
+
+  if (opType === "number" && data.number !== undefined) {
+    resultHtml = `
+      <div class="receipt-result">${data.number}</div>
+      <div style="text-align:center; font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem;">
+        Range: ${data.min} - ${data.max}
+      </div>`;
+  } else if (opType === "dice" && data.rolls) {
+    resultHtml = `
+      <div class="receipt-result">${data.total}</div>
+      <div style="text-align:center; font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem;">
+        ${data.dice}: [${data.rolls.join(", ")}] (min: ${data.min_possible}, max: ${data.max_possible})
+      </div>`;
+  } else if (opType === "pick" && data.picked !== undefined) {
+    resultHtml = `
+      <div class="receipt-result" style="font-size:1.2rem;">${data.picked}</div>
+      <div style="text-align:center; font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem;">
+        Index ${data.index} of ${data.total_items} items
+      </div>`;
+  } else if (opType === "shuffle" && data.shuffled) {
+    const display =
+      data.shuffled.length > 10
+        ? data.shuffled.slice(0, 10).join(", ") + "..."
+        : data.shuffled.join(", ");
+    resultHtml = `
+      <div style="background:rgba(0,0,0,0.3); border:1px solid var(--panel-border); border-radius:8px; padding:1rem; margin:0.5rem 0;">
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:0.5rem;">SHUFFLED ORDER</div>
+        <div style="font-size:0.85rem; color:var(--text-main); word-break:break-all;">${display}</div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.5rem;">${data.shuffled.length} items</div>
+      </div>`;
+  } else if (opType === "uuid" && data.uuid) {
+    resultHtml = `
+      <div style="background:rgba(0,0,0,0.3); border:1px solid var(--panel-border); border-radius:8px; padding:1rem; margin:0.5rem 0; position:relative;">
+        <input type="text" class="receipt-seed-input" value="${data.uuid}" readonly style="font-size:0.85rem;">
+        <button class="receipt-copy-btn" onclick="navigator.clipboard.writeText('${data.uuid}')">
+          <iconify-icon icon="ph:copy-bold"></iconify-icon>
+        </button>
+      </div>`;
+  } else if (opType === "winners" && data.winners) {
+    const winnerList = data.winners
+      .map(
+        (w) =>
+          `<div style="display:flex; justify-content:space-between; padding:0.4rem 0; border-bottom:1px solid var(--panel-border);">
+        <span style="color:var(--accent);">#${w.position}</span>
+        <span style="color:var(--text-main);">${w.item}</span>
+      </div>`,
+      )
+      .join("");
+    resultHtml = `
+      <div style="margin:0.5rem 0;">
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:0.5rem;">WINNERS (${data.count} of ${data.total_items})</div>
+        ${winnerList}
+      </div>`;
   } else if (data.random_seed) {
     resultHtml = `
       <div style="text-align:center; margin: 1rem 0;">
@@ -1170,12 +1295,12 @@ function showReceipt(data) {
       <div class="receipt-row">
         <span class="receipt-label">Transaction</span>
         <a href="${data.commitment.arweave_url}" target="_blank" class="receipt-link">
-          ${data.commitment.arweave_tx?.slice(0, 8) || "View"} <iconify-icon icon="ph:arrow-square-out-bold"></iconify-icon>
+          ${(data.commitment.arweave_tx || data.commitment.arweave_tx_id)?.slice(0, 8) || "View"} <iconify-icon icon="ph:arrow-square-out-bold"></iconify-icon>
         </a>
       </div>
       <div class="receipt-row">
         <span class="receipt-label">Commitment Hash</span>
-        <span class="receipt-value">${data.commitment.hash?.slice(0, 16)}...</span>
+        <span class="receipt-value">${(data.commitment.commitment_hash || data.commitment.hash || "")?.slice(0, 16)}...</span>
       </div>
     </div>
   `
@@ -1190,11 +1315,11 @@ function showReceipt(data) {
       <div class="receipt-section-title">Operation</div>
       <div class="receipt-row">
         <span class="receipt-label">Type</span>
-        <span class="receipt-value">${data.operation || data.type || "Randomness"}</span>
+        <span class="receipt-value highlight">${opType.toUpperCase()}</span>
       </div>
       <div class="receipt-row">
         <span class="receipt-label">Network</span>
-        <span class="receipt-value">${data.network || selectedNetwork}</span>
+        <span class="receipt-value">${selectedNetwork.toUpperCase()}</span>
       </div>
     </div>
     <div class="receipt-section">

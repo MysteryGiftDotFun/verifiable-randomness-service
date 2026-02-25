@@ -620,7 +620,10 @@ export function renderLandingPage(config: LandingConfig): string {
                 <div class="dropdown-option selected" data-value="randomness">Raw Randomness (Seed)</div>
                 <div class="dropdown-option" data-value="number">Random Number</div>
                 <div class="dropdown-option" data-value="dice">Roll Dice</div>
-                <div class="dropdown-option" data-value="pick">Pick Winner</div>
+                <div class="dropdown-option" data-value="pick">Pick Item</div>
+                <div class="dropdown-option" data-value="shuffle">Shuffle List</div>
+                <div class="dropdown-option" data-value="uuid">Generate UUID</div>
+                <div class="dropdown-option" data-value="winners">Pick Winners</div>
               </div>
             </div>
             <input type="hidden" id="op-type" value="randomness">
@@ -636,6 +639,15 @@ export function renderLandingPage(config: LandingConfig): string {
 
             <div id="inputs-pick" style="display:none">
               <input type="text" class="sleek-input" id="in-items" placeholder="Items (Comma separated)">
+            </div>
+
+            <div id="inputs-shuffle" style="display:none">
+              <input type="text" class="sleek-input" id="in-shuffle-items" placeholder="Items to Shuffle (Comma separated)">
+            </div>
+
+            <div id="inputs-winners" style="display:none">
+              <input type="text" class="sleek-input" id="in-winners-items" placeholder="Candidates (Comma separated)">
+              <input type="number" class="sleek-input" id="in-count" placeholder="Number of Winners (Default: 1)">
             </div>
           </div>
 
@@ -675,7 +687,7 @@ export function renderLandingPage(config: LandingConfig): string {
             <span class="card-label">Compose Hash (Code Fingerprint)</span>
             <div class="hash-display" id="compose-hash" style="font-size:0.7rem;">${composeHash}</div>
             <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem;">
-              Compare this hash with <a href="https://github.com/MysteryGiftDotFun/verifiable-randomness-service" target="_blank" style="color:var(--accent);">our source code</a> to verify we're running the exact code you expect.
+              Compare this hash with <a href="https://github.com/mysterygiftdotfun/verifiable-randomness-service" target="_blank" style="color:var(--accent);">our source code</a> to verify we're running the exact code you expect.
             </p>
           </div>
 
@@ -713,43 +725,13 @@ export function renderLandingPage(config: LandingConfig): string {
           <div class="card" style="margin-top:1rem; border-color:rgba(255, 77, 0, 0.3);">
             <span class="card-label" style="color:var(--accent);">
               <iconify-icon icon="ph:archive-box-fill" style="vertical-align:text-bottom; margin-right:0.3rem;"></iconify-icon>
-              Arweave Proof Verification
+              Arweave Verification
             </span>
-            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.8rem; line-height:1.6;">
-              Each response includes an Arweave proof. The proof contains a <code style="color:var(--accent);">commitment_hash</code> but <strong style="color:var(--text-main);">not the seed</strong> (for privacy). Verify like this:
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.8rem; line-height:1.5;">
+              Each response includes a <code style="color:var(--accent);">commitment_hash</code> stored on Arweave. Verify by computing:
             </p>
-
-            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.8rem; line-height:1.7;">
-              <div style="margin-bottom:0.5rem; display:flex; gap:8px;">
-                <span style="color:var(--accent); font-weight:700; min-width:18px;">1.</span>
-                <span>Save the <code style="color:#ffffff;">random_seed</code> from your API response</span>
-              </div>
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.8rem; line-height:1.7; display:flex; gap:0.3rem;">
-                <span style="color:var(--accent); font-weight:700; min-width:18px;">2.</span>
-                <span>Visit your <code style="color:#ffffff;">arweave_url</code> to get the <code style="color:#ffffff;">commitment_hash</code></span>
-              </div>
-              <div style="margin-bottom:0.5rem; display:flex; gap:8px;">
-                <span style="color:var(--accent); font-weight:700; min-width:18px;">3.</span>
-                <span>Compute: <code style="color:var(--accent);">SHA256(seed + request_hash)</code></span>
-              </div>
-              <div style="display:flex; gap:8px;">
-                <span style="color:var(--accent); font-weight:700; min-width:18px;">4.</span>
-                <span>If it matches <code style="color:var(--success);">commitment_hash</code> → proof is valid ✓</span>
-              </div>
-            </div>
-
-            <div style="background:rgba(0,0,0,0.4); border:1px solid var(--panel-border); border-radius:8px; padding:0.75rem; overflow-x:auto;">
-              <pre style="font-size:0.65rem; color:var(--text-muted); margin:0; line-height:1.5;"><code style="color:var(--text-main);">// JavaScript/Node.js
-const crypto = require('crypto');
-const expected = crypto
-  .createHash('sha256')
-  .update(response.random_seed)
-  .update(request_hash || '')
-  .digest('hex');
-
-if (expected === arweaveProof.commitment_hash) {
-  console.log('✓ Proof verified!');
-}</code></pre>
+            <div style="background:rgba(0,0,0,0.4); border:1px solid var(--panel-border); border-radius:8px; padding:0.75rem;">
+              <code style="font-size:0.75rem; color:var(--text-main);">SHA256(seed + request_hash) == commitment_hash</code>
             </div>
           </div>
         </div>
@@ -795,55 +777,45 @@ if (expected === arweaveProof.commitment_hash) {
           <div class="card">
             <span class="card-label">Quick Start</span>
             <div style="font-size:0.85rem; color:var(--text-muted); line-height:1.8;">
-              <div style="margin-bottom:0.8rem; display:flex; gap:10px;">
+              <div style="margin-bottom:0.6rem; display:flex; gap:10px;">
                 <span style="color:var(--accent); font-weight:700;">1.</span>
-                <span>Connect your wallet (Phantom, Solflare, or any supported wallet)</span>
+                <span>Connect wallet & select network</span>
               </div>
-              <div style="margin-bottom:0.8rem; display:flex; gap:10px;">
+              <div style="margin-bottom:0.6rem; display:flex; gap:10px;">
                 <span style="color:var(--accent); font-weight:700;">2.</span>
-                <span>Select operation type and configure parameters</span>
-              </div>
-              <div style="margin-bottom:0.8rem; display:flex; gap:10px;">
-                <span style="color:var(--accent); font-weight:700;">3.</span>
-                <span>Choose network (${supportedNetworks.join(" / ")})</span>
+                <span>Choose operation type</span>
               </div>
               <div style="display:flex; gap:10px;">
-                <span style="color:var(--accent); font-weight:700;">4.</span>
-                <span>Click "Initialize Randomness" and complete payment via facilitator</span>
+                <span style="color:var(--accent); font-weight:700;">3.</span>
+                <span>Pay $0.01 via x402 & get result</span>
               </div>
             </div>
           </div>
 
           <div class="card">
             <span class="card-label">Operations</span>
-            <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.7;">
-              <div style="margin-bottom:0.6rem;">
-                <strong style="color:var(--text-main);">Raw Randomness</strong> - 256-bit cryptographic seed
-              </div>
-              <div style="margin-bottom:0.6rem;">
-                <strong style="color:var(--text-main);">Random Number</strong> - Integer within min/max range
-              </div>
-              <div style="margin-bottom:0.6rem;">
-                <strong style="color:var(--text-main);">Roll Dice</strong> - Simulate dice rolls (e.g., 2d6, 1d20)
-              </div>
-              <div>
-                <strong style="color:var(--text-main);">Pick Winner</strong> - Select from comma-separated list
-              </div>
+            <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.6;">
+              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Randomness</strong> - 256-bit seed</div>
+              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Number</strong> - Integer in range [min, max]</div>
+              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Dice</strong> - Roll NdM (e.g., 2d6)</div>
+              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Pick</strong> - Select one item from list</div>
+              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Shuffle</strong> - Randomize list order</div>
+              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Winners</strong> - Select N winners from list</div>
+              <div><strong style="color:var(--text-main);">UUID</strong> - Generate v4 UUID</div>
             </div>
           </div>
 
           <div class="card">
             <span class="card-label">What is x402?</span>
-            <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.6; margin-bottom:0.5rem;">
-              Open standard for machine-to-machine payments via HTTP 402 headers. Enables instant, permissionless payments across multiple chains.
+            <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5; margin-bottom:0.5rem;">
+              Pay-per-request via HTTP 402 headers. <a href="https://www.x402.org" target="_blank" style="color:var(--accent);">Learn more &rarr;</a>
             </p>
-            <a href="https://www.x402.org" target="_blank" style="font-size:0.8rem; color:var(--accent);">Learn more &rarr;</a>
           </div>
 
           <div class="card">
             <span class="card-label">Verification</span>
-            <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.6;">
-              Each response includes a TEE attestation. Use the <strong style="color:var(--text-main);">AUDIT</strong> tab to verify the hardware signature and confirm the randomness was generated in a genuine Intel TDX enclave.
+            <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5;">
+              Every response includes a TEE attestation. Use <strong style="color:var(--text-main);">AUDIT</strong> tab to verify hardware signature.
             </p>
           </div>
         </div>
@@ -851,17 +823,21 @@ if (expected === arweaveProof.commitment_hash) {
         <!-- API -->
         <div id="v-api" class="tab-view">
           <div class="card">
-            <span class="card-label">API Endpoints (POST)</span>
-            <div class="hash-display" style="margin-bottom:0.5rem">/v1/randomness</div>
-            <div class="hash-display" style="margin-bottom:0.5rem">/v1/random/pick</div>
-            <div class="hash-display" style="margin-bottom:0.5rem">/v1/random/dice</div>
-            <div class="hash-display" style="margin-bottom:0.5rem">/v1/random/uuid</div>
-            <div class="hash-display">/v1/random/shuffle</div>
+            <span class="card-label">POST Endpoints</span>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.75rem;">
+              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/randomness</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/number</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/dice</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/pick</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/shuffle</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/winners</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/uuid</div>
+            </div>
           </div>
 
           <div class="card">
             <span class="card-label">Developer Resources</span>
-            <a href="https://github.com/mysterygift/mystery-gift" target="_blank" style="text-decoration:none">
+            <a href="https://github.com/mysterygiftdotfun/verifiable-randomness-service" target="_blank" style="text-decoration:none">
               <button class="std-btn" style="margin-bottom:0.8rem;">
                 <iconify-icon icon="ph:github-logo-fill" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon> View Source Code
               </button>

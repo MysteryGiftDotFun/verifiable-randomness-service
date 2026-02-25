@@ -1,12 +1,12 @@
 services:
   randomness-prod:
-    image: phantasybot/vrf-service:0.1.0-BETA-v69
+    image: phantasybot/vrf-service:0.1.0-BETA
     ports:
       - "3000:3000"
     environment:
       - PORT=3000
       - NODE_ENV=production
-      - APP_VERSION=0.1.0-BETA-v69
+      - APP_VERSION=0.1.0-BETA
       - APP_ENVIRONMENT=production
       - PAYMENT_WALLET=3Qudd5FG8foyFnbKxwfkDktnuushG7CDHBMSNk9owAjx
       - PAYMENT_WALLET_BASE=0x2d55488AD8dd2671c2F8D08FAad75908afa461c3
