@@ -129,7 +129,7 @@ export function renderLandingPage(config: LandingConfig): string {
     /* Layout */
     .layout {
       display: grid;
-      grid-template-columns: 1fr 450px;
+      grid-template-columns: 1fr 480px;
       height: 100vh;
       width: 100%;
       overflow: hidden;
@@ -215,18 +215,30 @@ export function renderLandingPage(config: LandingConfig): string {
       background: var(--accent);
     }
 
-    .version-tag {
+    .version-tag-container {
       position: absolute;
       bottom: 2rem;
       right: 2rem;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.25rem;
+    }
+
+    .version-tag {
       font-size: 0.75rem;
       color: var(--text-muted);
       opacity: 0.5;
       font-weight: 600;
-      z-index: 20;
       display: flex;
       align-items: center;
       gap: 0.5rem;
+      text-decoration: none;
+    }
+
+    .version-tag:hover {
+      opacity: 0.7;
     }
 
     .env-badge {
@@ -487,7 +499,7 @@ export function renderLandingPage(config: LandingConfig): string {
       flex-shrink: 0;
     }
     .console-header { padding: 0.6rem 2rem; display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.02); }
-    .console-indicator { width: 6px; height: 6px; border-radius: 50%; background: #ffffff; box-shadow: 0 0 5px #ffffff; }
+    .console-indicator { width: 6px; height: 6px; border-radius: 50%; background: #ffffff; }
     .console-content { padding: 0 2rem 1rem; overflow-y: auto; height: 160px; }
     .console-bar.expanded { height: 200px; }
 
@@ -587,12 +599,14 @@ export function renderLandingPage(config: LandingConfig): string {
         <img src="/assets/miss.png" class="miss-img" alt="Miss">
       </div>
 
-      <a href="/changelog" class="version-tag" style="text-decoration:none; cursor:pointer;">
-        v${version} &bull; <span id="version-hash">${composeHash.slice(0, 8)}</span>
-        <span class="env-badge ${envBadgeClass}">${envBadgeText}</span>
-      </a>
-      <div style="font-size:0.65rem; color:var(--text-muted); opacity:0.6; margin-top:0.25rem;">
-        BETA SOFTWARE — Use at your own risk
+      <div class="version-tag-container">
+        <a href="/changelog" class="version-tag" style="cursor:pointer;">
+          v${version} &bull; <span id="version-hash">${composeHash.slice(0, 8)}</span>
+          <span class="env-badge ${envBadgeClass}">${envBadgeText}</span>
+        </a>
+        <div style="font-size:0.65rem; color:var(--text-muted); opacity:0.6;">
+          BETA SOFTWARE — Use at your own risk
+        </div>
       </div>
     </div>
 
@@ -748,7 +762,7 @@ export function renderLandingPage(config: LandingConfig): string {
           <div class="card" style="border-color: var(--accent-glow);">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span class="card-label" style="color:var(--accent); margin-bottom:0;">Pricing</span>
-              <div style="font-size:1.2rem; font-weight:700; color:var(--text-main);">$0.01 <span style="font-size:0.8rem; color:var(--text-muted);">/ req</span></div>
+              <div style="font-size:2rem; font-weight:700; color:var(--text-main);">$0.01 <span style="font-size:0.9rem; color:var(--text-muted);">/ req</span></div>
             </div>
             <div style="margin-top:0.8rem; font-size:0.8rem; color:var(--text-muted);">
               Pay via x402 (SOLANA / BASE) &bull; 90% cheaper than Chainlink and Switchboard VRF
@@ -757,9 +771,13 @@ export function renderLandingPage(config: LandingConfig): string {
 
           <div class="card">
             <span class="card-label">Use Cases</span>
-            <p style="font-size:0.8rem; color:var(--text-muted); margin:0;">
-              NFT Mints &bull; Gacha / Loot &bull; Casino Games &bull; Tournaments &bull; PvP Selection
-            </p>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.75rem;">
+              <div class="hash-display" style="padding:0.5rem; margin:0;">NFT Mints</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">Gacha / Loot</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">Casino Games</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">Tournaments</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">PvP Selection</div>
+            </div>
           </div>
 
           <div class="card">
@@ -807,8 +825,8 @@ export function renderLandingPage(config: LandingConfig): string {
 
           <div class="card">
             <span class="card-label">What is x402?</span>
-            <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5; margin-bottom:0.5rem;">
-              Pay-per-request via HTTP 402 headers. <a href="https://www.x402.org" target="_blank" style="color:var(--accent);">Learn more &rarr;</a>
+            <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5; margin:0;">
+              Pay-per-request via <a href="https://www.x402.org" target="_blank" style="color:var(--accent);">HTTP 402 headers</a>.
             </p>
           </div>
 
