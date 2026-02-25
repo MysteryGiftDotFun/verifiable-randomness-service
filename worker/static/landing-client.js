@@ -11,10 +11,73 @@
 // ============================================================================
 (function () {
   if (typeof window !== "undefined" && typeof window.Buffer === "undefined") {
-    // Simple but complete Buffer polyfill for @solana/web3.js
+    // Helper function to add Buffer methods to a Uint8Array
+    function addBufferMethods(arr) {
+      arr.writeUInt8 = function (value, offset) {
+        this[offset] = value;
+      };
+      arr.writeUInt16LE = function (value, offset) {
+        this[offset] = value & 0xff;
+        this[offset + 1] = (value >> 8) & 0xff;
+      };
+      arr.writeUInt32LE = function (value, offset) {
+        this[offset] = value & 0xff;
+        this[offset + 1] = (value >> 8) & 0xff;
+        this[offset + 2] = (value >> 16) & 0xff;
+        this[offset + 3] = (value >> 24) & 0xff;
+      };
+      arr.writeBigUInt64LE = function (value, offset) {
+        const bigValue = BigInt(value);
+        for (let i = 0; i < 8; i++) {
+          this[offset + i] = Number((bigValue >> BigInt(i * 8)) & BigInt(0xff));
+        }
+      };
+      arr.writeBigInt64LE = function (value, offset) {
+        const bigValue = BigInt(value);
+        for (let i = 0; i < 8; i++) {
+          this[offset + i] = Number((bigValue >> BigInt(i * 8)) & BigInt(0xff));
+        }
+      };
+      arr.readUInt8 = function (offset) {
+        return this[offset];
+      };
+      arr.readUInt16LE = function (offset) {
+        return this[offset] | (this[offset + 1] << 8);
+      };
+      arr.readUInt32LE = function (offset) {
+        return (
+          this[offset] |
+          (this[offset + 1] << 8) |
+          (this[offset + 2] << 16) |
+          (this[offset + 3] << 24)
+        );
+      };
+      arr.readBigUInt64LE = function (offset) {
+        let result = BigInt(0);
+        for (let i = 0; i < 8; i++) {
+          result |= BigInt(this[offset + i]) << BigInt(i * 8);
+        }
+        return result;
+      };
+      arr.readBigInt64LE = function (offset) {
+        let result = BigInt(0);
+        for (let i = 0; i < 8; i++) {
+          result |= BigInt(this[offset + i]) << BigInt(i * 8);
+        }
+        return result;
+      };
+      arr.fill = function (value, start, end) {
+        for (let i = start || 0; i < (end || this.length); i++) {
+          this[i] = value;
+        }
+        return this;
+      };
+      return arr;
+    }
+
     const _Buffer = function Buffer(arg, encoding) {
       if (typeof arg === "number") {
-        return new Uint8Array(arg);
+        return addBufferMethods(new Uint8Array(arg));
       }
       if (typeof arg === "string") {
         if (encoding === "base64") {
@@ -23,14 +86,23 @@
           for (let i = 0; i < binary.length; i++) {
             bytes[i] = binary.charCodeAt(i);
           }
-          return bytes;
+          return addBufferMethods(bytes);
         }
-        return new TextEncoder().encode(arg);
+        return addBufferMethods(new TextEncoder().encode(arg));
       }
       if (arg instanceof Uint8Array) {
-        return arg;
+        const result = addBufferMethods(new Uint8Array(arg.length));
+        result.set(arg);
+        return result;
       }
-      return new Uint8Array(arg);
+      if (Array.isArray(arg)) {
+        const result = addBufferMethods(new Uint8Array(arg.length));
+        for (let i = 0; i < arg.length; i++) {
+          result[i] = arg[i];
+        }
+        return result;
+      }
+      return addBufferMethods(new Uint8Array(arg.length || 0));
     };
 
     _Buffer.from = function (arg, encoding) {
@@ -38,43 +110,98 @@
     };
 
     _Buffer.alloc = function (size) {
-      return new Uint8Array(size);
+      return _Buffer(size);
+    };
+
+    _Buffer.allocUnsafe = function (size) {
+      return _Buffer(size);
+    };
+
+    _Buffer.concat = function (list, totalLength) {
+      if (!Array.isArray(list)) {
+        throw new TypeError('"list" argument must be an Array of Buffers');
+      }
+      if (list.length === 0) {
+        return _Buffer(0);
+      }
+      const len = totalLength || list.reduce((acc, buf) => acc + buf.length, 0);
+      const result = _Buffer(len);
+      let offset = 0;
+      for (const buf of list) {
+        result.set(buf, offset);
+        offset += buf.length;
+      }
+      return result;
     };
 
     _Buffer.isBuffer = function (obj) {
-      return obj instanceof Uint8Array;
+      return obj instanceof Uint8Array && obj.writeBigUInt64LE !== undefined;
     };
 
-    Uint8Array.prototype.toString = function (encoding) {
-      if (encoding === "base64") {
-        let binary = "";
-        for (let i = 0; i < this.length; i++) {
-          binary += String.fromCharCode(this[i]);
+    // Add toString, equals, compare, slice, copy to Uint8Array prototype
+    if (!Uint8Array.prototype.toString) {
+      Uint8Array.prototype.toString = function (encoding) {
+        if (encoding === "base64") {
+          let binary = "";
+          for (let i = 0; i < this.length; i++) {
+            binary += String.fromCharCode(this[i]);
+          }
+          return btoa(binary);
         }
-        return btoa(binary);
-      }
-      return new TextDecoder().decode(this);
-    };
+        if (encoding === "hex") {
+          return Array.from(this)
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+        }
+        return new TextDecoder().decode(this);
+      };
+    }
 
-    Uint8Array.prototype.equals = function (other) {
-      if (this.length !== other.length) return false;
-      for (let i = 0; i < this.length; i++) {
-        if (this[i] !== other[i]) return false;
-      }
-      return true;
-    };
+    if (!Uint8Array.prototype.equals) {
+      Uint8Array.prototype.equals = function (other) {
+        if (this.length !== other.length) return false;
+        for (let i = 0; i < this.length; i++) {
+          if (this[i] !== other[i]) return false;
+        }
+        return true;
+      };
+    }
 
-    Uint8Array.prototype.compare = function (other) {
-      for (let i = 0; i < Math.min(this.length, other.length); i++) {
-        if (this[i] < other[i]) return -1;
-        if (this[i] > other[i]) return 1;
-      }
-      return this.length - other.length;
-    };
+    if (!Uint8Array.prototype.compare) {
+      Uint8Array.prototype.compare = function (
+        other,
+        targetStart,
+        targetEnd,
+        sourceStart,
+        sourceEnd,
+      ) {
+        const a = this.slice(sourceStart || 0, sourceEnd || this.length);
+        const b = other.slice(targetStart || 0, targetEnd || other.length);
+        for (let i = 0; i < Math.min(a.length, b.length); i++) {
+          if (a[i] < b[i]) return -1;
+          if (a[i] > b[i]) return 1;
+        }
+        return a.length - b.length;
+      };
+    }
 
-    Uint8Array.prototype.slice = function (start, end) {
-      return new Uint8Array(Array.from(this).slice(start, end));
-    };
+    if (!Uint8Array.prototype.copy) {
+      Uint8Array.prototype.copy = function (
+        target,
+        targetStart,
+        sourceStart,
+        sourceEnd,
+      ) {
+        target.set(
+          this.slice(sourceStart || 0, sourceEnd || this.length),
+          targetStart || 0,
+        );
+        return Math.min(
+          target.length - (targetStart || 0),
+          (sourceEnd || this.length) - (sourceStart || 0),
+        );
+      };
+    }
 
     window.Buffer = _Buffer;
   }
@@ -864,9 +991,12 @@ async function createSolanaPayment(paymentReq, body) {
   // Instruction 0: SetComputeUnitLimit
   // Instruction 1: SetComputeUnitPrice
   // Instruction 2: TransferChecked
+  // NOTE: microLamports must be BigInt for proper encoding
   const transaction = new Transaction()
     .add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200000 }))
-    .add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1000 }))
+    .add(
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: BigInt(1000) }),
+    )
     .add(transferIx);
 
   transaction.feePayer = new PublicKey(facilitatorFeePayer);
