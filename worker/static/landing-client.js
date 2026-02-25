@@ -17,11 +17,14 @@ const ASSOCIATED_TOKEN_PROGRAM_ID =
 const splToken = {
   async getAssociatedTokenAddress(mint, owner) {
     const { PublicKey } = solanaWeb3;
+    // Handle both string and PublicKey inputs
+    const ownerKey = typeof owner === "string" ? new PublicKey(owner) : owner;
+    const mintKey = typeof mint === "string" ? new PublicKey(mint) : mint;
     const [address] = await PublicKey.findProgramAddress(
       [
-        owner.toBuffer(),
+        ownerKey.toBuffer(),
         new PublicKey(SPL_TOKEN_PROGRAM_ID).toBuffer(),
-        mint.toBuffer(),
+        mintKey.toBuffer(),
       ],
       new PublicKey(ASSOCIATED_TOKEN_PROGRAM_ID),
     );
@@ -88,6 +91,15 @@ const splToken = {
     decimals,
   ) {
     const { PublicKey, TransactionInstruction } = solanaWeb3;
+    // Handle both string and PublicKey inputs
+    const sourceKey =
+      typeof source === "string" ? new PublicKey(source) : source;
+    const mintKey = typeof mint === "string" ? new PublicKey(mint) : mint;
+    const destKey =
+      typeof destination === "string"
+        ? new PublicKey(destination)
+        : destination;
+    const ownerKey = typeof owner === "string" ? new PublicKey(owner) : owner;
     // Build 10-byte transferChecked instruction data: [12, amount_le_u64, decimals_u8]
     const data = new Uint8Array(10);
     data[0] = 12; // TransferChecked instruction
@@ -98,10 +110,10 @@ const splToken = {
     data[9] = decimals;
     return new TransactionInstruction({
       keys: [
-        { pubkey: source, isSigner: false, isWritable: true },
-        { pubkey: mint, isSigner: false, isWritable: false },
-        { pubkey: destination, isSigner: false, isWritable: true },
-        { pubkey: owner, isSigner: true, isWritable: false },
+        { pubkey: sourceKey, isSigner: false, isWritable: true },
+        { pubkey: mintKey, isSigner: false, isWritable: false },
+        { pubkey: destKey, isSigner: false, isWritable: true },
+        { pubkey: ownerKey, isSigner: true, isWritable: false },
       ],
       programId: new PublicKey(SPL_TOKEN_PROGRAM_ID),
       data,
@@ -182,11 +194,18 @@ const X402EVM = {
 
   // Create x402 payment payload using official format
   async createPaymentPayload(provider, network, paymentRequirements) {
-    const { maxAmountRequired, asset, payTo } = paymentRequirements;
+    // Note: x402 v2 response uses 'amount' not 'maxAmountRequired'
+    // CRITICAL: Use ALL fields from server's payment requirements
+    const { amount, asset, payTo, maxTimeoutSeconds, extra } =
+      paymentRequirements;
+    const maxAmountRequired = amount; // For backward compatibility
 
-    // Get account
-    const accounts = await provider.request({ method: "eth_requestAccounts" });
-    const from = accounts[0];
+    // Use the already-connected wallet address from global wallet variable
+    // This avoids calling eth_requestAccounts again which can fail
+    const from = wallet;
+    if (!from) {
+      throw new Error("No wallet connected. Please connect your wallet first.");
+    }
 
     // Generate authorization parameters
     const validAfter = Math.floor(Date.now() / 1000);
@@ -208,25 +227,40 @@ const X402EVM = {
       asset,
     );
 
-    // Sign with MetaMask
-    const signature = await provider.request({
-      method: "eth_signTypedData_v4",
-      params: [from, JSON.stringify(typedData)],
-    });
+    // Sign with MetaMask - use eth_signTypedData_v4
+    let signature;
+    try {
+      signature = await provider.request({
+        method: "eth_signTypedData_v4",
+        params: [from, JSON.stringify(typedData)],
+      });
+    } catch (signError) {
+      console.error("Signing error:", signError);
+      throw new Error(
+        "Failed to sign payment: " + (signError.message || signError),
+      );
+    }
+
+    // Get the current page URL for the resource
+    const resourceUrl = window.location.origin + "/v1/randomness";
 
     // Return x402 v2 payment payload format
     // CRITICAL: Must include ALL required fields per x402 spec
     return {
       x402Version: 2,
-      scheme: "exact",
-      network: network,
+      resource: {
+        url: resourceUrl,
+        description: "TEE Randomness Request",
+        mimeType: "application/json",
+      },
       accepted: {
         scheme: "exact",
         network: network,
         amount: maxAmountRequired,
         asset: asset,
         payTo: payTo,
-        maxTimeoutSeconds: 60,
+        maxTimeoutSeconds: maxTimeoutSeconds,
+        extra: extra,
       },
       payload: {
         signature: signature,
@@ -521,11 +555,34 @@ async function generate() {
 
     // Handle x402 payment required
     if (response.status === 402) {
-      const paymentHeader = response.headers.get("payment-required");
+      // Try both header name variations (x402 spec uses different cases)
+      let paymentHeader = null;
+      paymentHeader =
+        paymentHeader ||
+        response.headers.get("PAYMENT-REQUIRED") ||
+        response.headers.get("payment-required");
+      if (!paymentHeader) {
+        // Also check lowercase
+        for (const key of response.headers.keys()) {
+          if (key.toLowerCase() === "payment-required") {
+            paymentHeader = response.headers.get(key);
+            break;
+          }
+        }
+      }
+
       if (paymentHeader) {
         log("Payment required, processing...", "info");
+        console.log(
+          "Payment header received:",
+          paymentHeader.substring(0, 100) + "...",
+        );
 
         const paymentRequirements = JSON.parse(atob(paymentHeader));
+        console.log(
+          "Payment requirements:",
+          JSON.stringify(paymentRequirements).substring(0, 200) + "...",
+        );
 
         // Find matching payment method based on selected network
         const accept = paymentRequirements.accepts.find(
@@ -553,21 +610,67 @@ async function generate() {
           );
         }
 
-        // Retry with payment
+        // Retry with payment - use PAYMENT-SIGNATURE header with base64 encoding
+        const paymentPayload = btoa(JSON.stringify(payment));
+        console.log(
+          "Sending payment payload:",
+          JSON.stringify(payment, null, 2).substring(0, 500),
+        );
+        console.log(
+          "Payment header (base64):",
+          paymentPayload.substring(0, 100) + "...",
+        );
+
         response = await fetch(endpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Payment": JSON.stringify(payment),
+            "PAYMENT-SIGNATURE": paymentPayload,
           },
           body: JSON.stringify(body),
         });
+
+        console.log("Payment response status:", response.status);
+        console.log(
+          "Payment response headers:",
+          [...response.headers.entries()]
+            .map((h) => h[0] + "=" + h[1])
+            .join(", "),
+        );
       }
     }
 
     if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error || "Request failed");
+      const errText = await response.text();
+      let errMsg = "Request failed";
+
+      // If 402, decode the payment-required header for more details
+      if (response.status === 402) {
+        const paymentErrHeader =
+          response.headers.get("PAYMENT-REQUIRED") ||
+          response.headers.get("payment-required");
+        if (paymentErrHeader) {
+          try {
+            const paymentErr = JSON.parse(atob(paymentErrHeader));
+            console.error("Payment error details:", paymentErr);
+            errMsg = paymentErr.error || errMsg;
+            if (paymentErr.accepts) {
+              console.log("Available payment options:", paymentErr.accepts);
+            }
+          } catch (e) {
+            console.error("Could not decode payment error header");
+          }
+        }
+      }
+
+      try {
+        const err = JSON.parse(errText);
+        errMsg = err.error || err.message || errMsg;
+      } catch {
+        errMsg = errText.substring(0, 200) || errMsg;
+      }
+      console.error("Server error response:", errText);
+      throw new Error(errMsg);
     }
 
     const data = await response.json();
@@ -591,12 +694,18 @@ async function generate() {
 async function createSolanaPayment(paymentReq, body) {
   const { Connection, PublicKey, Transaction } = solanaWeb3;
 
+  // Convert wallet string to PublicKey
+  const walletPublicKey = new PublicKey(wallet);
+
   // Get the payment asset (USDC)
   const usdcMint = new PublicKey(paymentReq.asset);
   const paymentWallet = new PublicKey(paymentReq.payTo);
 
-  // Get sender's token account
-  const senderATA = await splToken.getAssociatedTokenAddress(usdcMint, wallet);
+  // Get sender's token account - pass PublicKey, not string
+  const senderATA = await splToken.getAssociatedTokenAddress(
+    usdcMint,
+    walletPublicKey,
+  );
 
   // Get sender's token account balance
   const connection = new Connection(HELIUS_RPC_URL, "confirmed");
@@ -610,20 +719,26 @@ async function createSolanaPayment(paymentReq, body) {
     );
   }
 
-  // Create transfer instruction
+  // Create transfer instruction - pass PublicKey, not string
   const amount = BigInt(paymentReq.amount);
   const transferIx = splToken.createTransferCheckedInstruction(
     senderATA,
     usdcMint,
     paymentWallet,
-    wallet,
+    walletPublicKey,
     amount,
     6, // USDC has 6 decimals
   );
 
-  // Build and sign transaction
+  // Build and sign transaction - use FACILITATOR's feePayer (not user's wallet!)
+  // The facilitator pays transaction fees, so it must be the feePayer
+  const facilitatorFeePayer = paymentReq.extra?.feePayer;
+  if (!facilitatorFeePayer) {
+    throw new Error("No feePayer provided in payment requirements");
+  }
+
   const transaction = new Transaction().add(transferIx);
-  transaction.feePayer = wallet;
+  transaction.feePayer = new PublicKey(facilitatorFeePayer);
   transaction.recentBlockhash = (
     await connection.getLatestBlockhash()
   ).blockhash;
@@ -632,15 +747,31 @@ async function createSolanaPayment(paymentReq, body) {
   const signedTx = await window.solana.signTransaction(transaction);
 
   // Serialize
+  // Use browser-compatible base64 encoding (no Buffer)
   const serialized = signedTx.serialize();
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(serialized)));
+
+  // Get the current page URL for the resource
+  const resourceUrl = window.location.origin + "/v1/randomness";
 
   return {
-    scheme: "exact",
-    network: paymentReq.network,
-    amount: paymentReq.amount,
-    asset: paymentReq.asset,
+    x402Version: 2,
+    resource: {
+      url: resourceUrl,
+      description: "TEE Randomness Request",
+      mimeType: "application/json",
+    },
+    accepted: {
+      scheme: "exact",
+      network: paymentReq.network,
+      amount: paymentReq.amount,
+      asset: paymentReq.asset,
+      payTo: paymentReq.payTo,
+      maxTimeoutSeconds: paymentReq.maxTimeoutSeconds,
+      extra: paymentReq.extra,
+    },
     payload: {
-      transaction: Buffer.from(serialized).toString("base64"),
+      transaction: base64,
     },
   };
 }

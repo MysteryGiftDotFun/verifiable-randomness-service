@@ -76,13 +76,106 @@ This will:
 ### Local Development
 
 ```bash
-# Install dependencies
-npm install
+# Install dependencies (includes tsx for dev)
+cd services/verifiable-randomness-service/worker
+pnpm install
 
-# Run dev server (simulation mode)
+# Run dev server (simulation mode, no build needed)
+# - Dev runs on port 3006 to avoid conflicts
+# - Uses tsx to run TypeScript directly
 npm run dev
 
-# Open http://localhost:3000 for the landing page
+# Open http://localhost:3006 for the landing page
+```
+
+**Note:** The dev server uses tsx to run TypeScript directly without compiling. Changes to `.ts` files are reflected immediately on restart.
+
+### Local Testing with npm (Production Mode)
+
+Test the service locally using mainnet with real x402 payments:
+
+```bash
+# 1. Install dependencies (if not already done)
+npm install
+
+# 2. Build TypeScript
+npm run build
+
+# 3. Start the server (uses .env file values for mainnet)
+npm start
+```
+
+The server will start on `http://localhost:3000` with:
+
+- **Helius RPC**: Mainnet Solana
+- **Alchemy RPC**: Mainnet Base
+- **x402 Payment**: Enabled for Solana (USDC) and Base (USDC)
+- **Price**: $0.01 USDC per randomness request
+
+**Test the endpoints:**
+
+```bash
+# Health check
+curl http://localhost:3000/v1/health
+
+# Get pricing info (shows payment requirements)
+curl http://localhost:3000/v1/pricing
+
+# Try generating randomness (will return 402 if no payment)
+curl -X POST http://localhost:3000/v1/random/number \
+  -H "Content-Type: application/json" \
+  -d '{"min": 1, "max": 100}'
+```
+
+**Environment Variables:**
+
+The service uses values from `.env` file:
+
+- `HELIUS_RPC_URL` - Solana mainnet RPC
+- `BASE_RPC_URL` - Base mainnet RPC
+- `PAYMENT_WALLET` - Solana payment wallet
+- `PAYMENT_WALLET_BASE` - Base payment wallet
+- `X402_FACILITATOR_URL` - PayAI facilitator
+- `SUPPORTED_NETWORKS` - solana,base
+
+See `.env` file for current production values.
+
+### Building on Hetzner (Cross-Platform Build)
+
+The VRF service runs on Phala CVMs (x86_64/amd64). If building locally on Apple Silicon (arm64), use the Hetzner build server to avoid QEMU emulation overhead.
+
+**Workflow:**
+
+```bash
+# 1. Make code changes locally
+
+# 2. Sync to Hetzner (excludes node_modules, dist, .git)
+rsync -avz --exclude node_modules --exclude dist --exclude .git \
+  services/verifiable-randomness-service/worker/ \
+  hetzner-phantasy-001:/home/phantasy/mystery-gift-deploy/services/verifiable-randomness-service/worker/
+
+# 3. SSH to Hetzner and build
+ssh hetzner-phantasy-001
+cd /home/phantasy/mystery-gift-deploy/services/verifiable-randomness-service/worker
+
+# Build and push Docker image
+docker build -t phantasybot/vrf-service:0.1.0-BETA-v73 .
+docker push phantasybot/vrf-service:0.1.0-BETA-v73
+
+# 4. Deploy to Phala CVM
+cd /home/phantasy/mystery-gift-deploy
+npx phala deploy --cvm-id <CVM_ID> \
+  -c services/verifiable-randomness-service/worker/phala-compose.prod-v71.yaml \
+  -e services/verifiable-randomness-service/worker/.env
+```
+
+**Git Access on Hetzner:**
+
+The Hetzner server has the `-lite` SSH key configured for GitHub. Use `github.com-lite` for git operations:
+
+```bash
+ssh hetzner-phantasy-001
+git clone git@github.com-lite:MysteryGiftDotFun/verifiable-randomness-service.git
 ```
 
 ## Features

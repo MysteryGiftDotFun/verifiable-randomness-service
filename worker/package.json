@@ -2,31 +2,41 @@
   "name": "verifiable-randomness-service",
   "version": "0.1.0-BETA",
   "description": "Secure Randomness Generator for Phala TEE with x402 Payment Support",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "build:client": "node scripts/build-client.js",
+    "build:all": "npm run build && npm run build:client",
     "start": "node dist/index.js",
-    "dev": "PORT=3006 ts-node src/index.ts"
+    "dev": "PORT=3006 tsx src/index.ts"
   },
   "dependencies": {
-    "@sentry/node": "^7.99.0",
-    "@phala/dstack-sdk": "^0.5.7",
     "@ardrive/turbo-sdk": "^1.19.0",
+    "@payai/facilitator": "^2.2.4",
+    "@payai/x402-evm": "^2.2.4",
+    "@payai/x402-svm": "^2.2.4",
+    "@phala/dstack-sdk": "^0.5.7",
+    "@sentry/node": "^7.99.0",
     "@solana/web3.js": "^1.98.4",
+    "@x402/core": "^2.4.0",
+    "@x402/evm": "^2.4.0",
+    "@x402/express": "^2.4.0",
+    "@x402/svm": "^2.4.0",
     "bs58": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "ioredis": "^5.4.1",
-    "lru-cache": "^10.1.0",
-    "x402": "workspace:*"
+    "lru-cache": "^10.1.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^20.10.0",
-    "ts-node": "^10.9.1",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.7.0",
     "typescript": "^5.3.2"
   },
   "engines": {

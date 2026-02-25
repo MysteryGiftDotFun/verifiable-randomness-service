@@ -25,6 +25,8 @@ import { paymentMiddleware } from "@x402/express";
 
 import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
 
+// Use official x402 schemes (merchant-side) with PayAI hosted facilitator
+// NOTE: @payai/x402-* schemes are for SELF-HOSTED facilitators, NOT for PayAI hosted
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { ExactSvmScheme } from "@x402/svm/exact/server";
 
@@ -53,6 +55,13 @@ app.use(
           ],
     credentials: true,
     optionsSuccessStatus: 200,
+    exposedHeaders: [
+      "payment-required",
+      "payment-response",
+      "PAYMENT-REQUIRED",
+      "PAYMENT-RESPONSE",
+      "PAYMENT-SIGNATURE",
+    ],
   }),
 );
 
@@ -84,13 +93,21 @@ const packageJson = JSON.parse(
 );
 const VERSION = packageJson.version;
 
-// x402 Facilitator Configuration - using official @x402/express middleware
+// x402 Facilitator Configuration - using PayAI SDKs for better compatibility
 const facilitatorClient = new HTTPFacilitatorClient(facilitator);
-const x402Server = new x402ResourceServer(facilitatorClient)
+
+// Create x402ResourceServer with PayAI schemes (better error handling)
+const x402Server = new x402ResourceServer(facilitatorClient);
+
+// Register official x402 schemes (merchant-side)
+// These work with PayAI's hosted facilitator which provides feePayer addresses
+x402Server
   .register("eip155:8453", new ExactEvmScheme()) // Base mainnet
   .register("eip155:84532", new ExactEvmScheme()) // Base Sepolia
   .register("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", new ExactSvmScheme()) // Solana mainnet
   .register("solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", new ExactSvmScheme()); // Solana devnet
+
+console.log("[x402] Registered official x402 EVM and SVM schemes");
 
 const SUPPORTED_NETWORKS = ["solana", "base"];
 
@@ -367,7 +384,8 @@ const paidLimiter = rateLimit({
   max: 20, // 20 paid requests per minute
   keyGenerator: (req) => {
     // Rate limit by payment payload hash OR IP
-    const paymentHeader = req.get("X-Payment");
+    // Check both X-Payment (legacy) and PAYMENT-SIGNATURE (x402 v2)
+    const paymentHeader = req.get("X-Payment") || req.get("PAYMENT-SIGNATURE");
     if (paymentHeader) {
       return crypto
         .createHash("sha256")
@@ -1777,25 +1795,57 @@ async function start() {
     console.error("=".repeat(80));
   }
 
-  // Serve static files from /app/static
-  const staticPath = "/app/static";
+  // Determine static path based on environment
+  // Production: /app/static (Docker volume)
+  // Local dev: ./static (relative to project root)
+  let staticPath = "/app/static";
+  if (!fs.existsSync(staticPath)) {
+    staticPath = path.join(__dirname, "..", "static");
+    if (!fs.existsSync(staticPath)) {
+      staticPath = path.join(process.cwd(), "static");
+    }
+  }
   console.log(`[TEE] Serving static from: ${staticPath}`);
-  app.use("/assets", express.static(staticPath));
-  app.use("/static", express.static(staticPath));
-  // Also try /app/dist for landing-client.js
-  app.use(express.static("/app/dist"));
-  // Root fallback
-  app.use(express.static(staticPath));
 
-  // Explicit route for landing-client.js - read from known absolute path
+  if (fs.existsSync(staticPath)) {
+    app.use("/assets", express.static(staticPath));
+    app.use("/static", express.static(staticPath));
+    app.use(express.static(staticPath));
+  }
+
+  // Also try /app/dist as fallback
+  const distPath = "/app/dist";
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+  }
+
+  // Explicit route for landing-client.js - handles both local dev and production
   app.get("/landing-client.js", (req, res) => {
-    const fs = require("fs");
-    const filePath = "/app/dist/landing-client.js";
+    // Check multiple possible locations
+    const possiblePaths = [
+      path.join(__dirname, "..", "static", "landing-client.js"),
+      path.join(process.cwd(), "static", "landing-client.js"),
+      path.join(staticPath, "landing-client.js"),
+      "/app/static/landing-client.js",
+      "/app/dist/landing-client.js",
+    ];
 
-    if (fs.existsSync(filePath)) {
+    let filePath = null;
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        filePath = p;
+        break;
+      }
+    }
+
+    if (filePath) {
+      console.log(`[TEE] Serving landing-client.js from: ${filePath}`);
       res.setHeader("Content-Type", "application/javascript");
       res.send(fs.readFileSync(filePath, "utf-8"));
     } else {
+      console.error(
+        `[TEE] landing-client.js not found. Searched: ${possiblePaths.join(", ")}`,
+      );
       res.status(404).send("Not found");
     }
   });

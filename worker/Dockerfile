@@ -3,20 +3,14 @@ FROM node:20
 WORKDIR /app
 
 # Install curl for healthcheck
-RUN apt-get update && apt-get install -y curl jq && rm -rf /var/lib/apt/lists/*
-
-# Copy x402 shared package (pre-copied by build script)
-COPY .x402-pkg /app/.x402-pkg
+RUN apt-get update --allow-insecure-repositories && apt-get install -y --allow-unauthenticated curl jq && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies
 COPY package.json .
 COPY tsconfig.json .
 
-# Remove workspace:* deps (not supported by npm), then install deps + x402 as file dep
-RUN jq 'del(.dependencies["x402"])' package.json > package.tmp.json \
-    && mv package.tmp.json package.json \
-    && npm install \
-    && npm install /app/.x402-pkg
+# Remove workspace:* deps (not supported by npm), then install deps
+RUN npm install
 
 # Copy source
 COPY src ./src
@@ -26,8 +20,11 @@ COPY CHANGELOG.md .
 # Build TypeScript
 RUN npm run build
 
+# Copy landing-client.js to dist/static/ for landing page (after build creates dist/)
+RUN mkdir -p dist/static && cp static/landing-client.js dist/static/ && ls -la dist/
+
 # Remove dev dependencies
-RUN npm prune --production && npm install /app/.x402-pkg
+RUN npm prune --production
 
 # Create non-root user and set permissions
 RUN useradd -m -s /bin/bash appuser && chown -R appuser:appuser /app

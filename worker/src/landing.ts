@@ -7,11 +7,35 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 
-const LANDING_CLIENT_JS = fs.readFileSync(
-  path.join(__dirname, "static", "landing-client.js"),
-  "utf-8",
-);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function findLandingClientJS(): string {
+  const possiblePaths = [
+    path.join(__dirname, "static", "landing-client.js"),
+    path.join(__dirname, "..", "static", "landing-client.js"),
+    path.join(process.cwd(), "static", "landing-client.js"),
+    path.join(process.cwd(), "dist", "static", "landing-client.js"),
+    path.join(process.cwd(), "dist", "landing-client.js"),
+  ];
+
+  for (const p of possiblePaths) {
+    try {
+      if (fs.existsSync(p)) {
+        return fs.readFileSync(p, "utf-8");
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(
+    `landing-client.js not found. Searched: ${possiblePaths.join(", ")}`,
+  );
+}
+
+const LANDING_CLIENT_JS = findLandingClientJS();
 
 export interface LandingConfig {
   version: string;
