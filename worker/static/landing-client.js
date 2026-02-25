@@ -301,6 +301,51 @@ document.addEventListener("click", (e) => {
     dropdown.classList.remove("open");
 });
 
+// Handle dropdown option selection
+document.addEventListener("DOMContentLoaded", () => {
+  const dropdownOptions = document.querySelectorAll(".dropdown-option");
+  dropdownOptions.forEach((option) => {
+    option.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const value = option.getAttribute("data-value");
+      const text = option.textContent;
+
+      // Update hidden input
+      const hiddenInput = document.getElementById("op-type");
+      if (hiddenInput) hiddenInput.value = value;
+
+      // Update displayed text
+      const selectedDiv = document.querySelector(".dropdown-selected");
+      if (selectedDiv) selectedDiv.textContent = text;
+
+      // Update selected class
+      dropdownOptions.forEach((opt) => opt.classList.remove("selected"));
+      option.classList.add("selected");
+
+      // Close dropdown
+      const dropdown = document.getElementById("op-dropdown");
+      if (dropdown) dropdown.classList.remove("open");
+
+      // Show/hide input fields based on operation type
+      const inputsNumber = document.getElementById("inputs-number");
+      const inputsDice = document.getElementById("inputs-dice");
+      const inputsPick = document.getElementById("inputs-pick");
+
+      if (inputsNumber) inputsNumber.style.display = "none";
+      if (inputsDice) inputsDice.style.display = "none";
+      if (inputsPick) inputsPick.style.display = "none";
+
+      if (value === "number" && inputsNumber) {
+        inputsNumber.style.display = "block";
+      } else if (value === "dice" && inputsDice) {
+        inputsDice.style.display = "block";
+      } else if (value === "pick" && inputsPick) {
+        inputsPick.style.display = "block";
+      }
+    });
+  });
+});
+
 function log(msg, type = "info") {
   const c = document.getElementById("console");
   if (!c) return;
@@ -692,7 +737,8 @@ async function generate() {
 
 // Create Solana payment using spl-token
 async function createSolanaPayment(paymentReq, body) {
-  const { Connection, PublicKey, Transaction } = solanaWeb3;
+  const { Connection, PublicKey, Transaction, ComputeBudgetProgram } =
+    solanaWeb3;
 
   // Convert wallet string to PublicKey
   const walletPublicKey = new PublicKey(wallet);
@@ -737,18 +783,30 @@ async function createSolanaPayment(paymentReq, body) {
     throw new Error("No feePayer provided in payment requirements");
   }
 
-  const transaction = new Transaction().add(transferIx);
+  // CRITICAL: x402-svm requires compute budget instructions as first two instructions
+  // Instruction 0: SetComputeUnitLimit
+  // Instruction 1: SetComputeUnitPrice
+  // Instruction 2: TransferChecked
+  const transaction = new Transaction()
+    .add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200000 }))
+    .add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1000 }))
+    .add(transferIx);
+
   transaction.feePayer = new PublicKey(facilitatorFeePayer);
   transaction.recentBlockhash = (
     await connection.getLatestBlockhash()
   ).blockhash;
 
-  // Sign with Phantom/Solflare
+  // Sign with Phantom/Solflare - only signs the transfer instruction
+  // The feePayer signature will be added by the facilitator
   const signedTx = await window.solana.signTransaction(transaction);
 
-  // Serialize
-  // Use browser-compatible base64 encoding (no Buffer)
-  const serialized = signedTx.serialize();
+  // Serialize as PARTIALLY-signed transaction
+  // The facilitator will add the feePayer signature
+  // CRITICAL: requireAllSignatures: false allows missing feePayer signature
+  const serialized = signedTx.serialize({
+    requireAllSignatures: false,
+  });
   const base64 = btoa(String.fromCharCode(...new Uint8Array(serialized)));
 
   // Get the current page URL for the resource
@@ -846,13 +904,13 @@ function showReceipt(data) {
   let resultHtml = "";
   if (data.result?.value) {
     resultHtml = `<div class="receipt-result">${data.result.value}</div>`;
-  } else if (data.result?.seed) {
+  } else if (data.random_seed) {
     resultHtml = `
       <div style="text-align:center; margin: 1rem 0;">
         <div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:0.5rem;">RANDOM SEED (256-bit)</div>
         <div style="position:relative;">
-          <input type="text" class="receipt-seed-input" value="${data.result.seed}" readonly>
-          <button class="receipt-copy-btn" onclick="navigator.clipboard.writeText('${data.result.seed}')">
+          <input type="text" class="receipt-seed-input" value="${data.random_seed}" readonly>
+          <button class="receipt-copy-btn" onclick="navigator.clipboard.writeText('${data.random_seed}')">
             <iconify-icon icon="ph:copy-bold"></iconify-icon>
           </button>
         </div>
