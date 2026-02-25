@@ -969,12 +969,19 @@ async function createSolanaPayment(paymentReq, body) {
     );
   }
 
-  // Create transfer instruction - pass PublicKey, not string
+  // Get recipient's ATA (destination token account)
+  // CRITICAL: Must send to the ATA, not the wallet address directly
+  const destATA = await splToken.getAssociatedTokenAddress(
+    usdcMint,
+    paymentWallet,
+  );
+
+  // Create transfer instruction with correct destination ATA
   const amount = BigInt(paymentReq.amount);
   const transferIx = splToken.createTransferCheckedInstruction(
     senderATA,
     usdcMint,
-    paymentWallet,
+    destATA, // Recipient's token account (NOT wallet address)
     walletPublicKey,
     amount,
     6, // USDC has 6 decimals
