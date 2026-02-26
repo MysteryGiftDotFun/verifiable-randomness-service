@@ -35,6 +35,7 @@ import { facilitator } from "@payai/facilitator";
 import { renderLandingPage } from "./landing.js";
 
 const app = express();
+app.set("trust proxy", true);
 
 app.use(express.json());
 
@@ -377,6 +378,15 @@ const globalLimiter = rateLimit({
   message: { error: "Too many requests, please slow down" },
   standardHeaders: true,
   legacyHeaders: false,
+  // Get real IP from X-Forwarded-For when behind proxy
+  keyGenerator: (req) => {
+    const forwarded = req.get("x-forwarded-for");
+    if (forwarded) {
+      return forwarded.split(",")[0].trim();
+    }
+    return req.ip || req.socket?.remoteAddress || "unknown";
+  },
+  validate: false, // Disable validation when trust proxy is enabled
 });
 
 const paidLimiter = rateLimit({
@@ -393,9 +403,15 @@ const paidLimiter = rateLimit({
         .digest("hex")
         .slice(0, 16);
     }
-    return req.ip || "unknown";
+    // Get real IP from X-Forwarded-For when behind proxy
+    const forwarded = req.get("x-forwarded-for");
+    if (forwarded) {
+      return forwarded.split(",")[0].trim();
+    }
+    return req.ip || req.socket?.remoteAddress || "unknown";
   },
   message: { error: "Rate limit exceeded for paid requests" },
+  validate: false, // Disable validation when trust proxy is enabled
 });
 
 // Apply global rate limiter to all /v1/ routes
@@ -576,9 +592,27 @@ app.post(
 
       usageStats.totalRequests++;
 
+      // Generate request_hash from payment signature if not provided
+      const paymentSignature =
+        req.get("payment-signature") || req.get("x-payment");
+      const rHash =
+        request_hash ||
+        (paymentSignature
+          ? crypto
+              .createHash("sha256")
+              .update(paymentSignature)
+              .digest("hex")
+              .slice(0, 16)
+          : crypto
+              .createHash("sha256")
+              .update(JSON.stringify(req.body))
+              .digest("hex")
+              .slice(0, 16));
+
       console.log(`[TEE] Randomness request:`, {
         payment: (req as any).paymentStatus,
         metadata,
+        request_hash: rHash,
         total: usageStats.totalRequests,
       });
 
@@ -587,12 +621,12 @@ app.post(
       const seed = randomBytes.toString("hex");
 
       // 2. Generate Remote Attestation (The "Proof")
-      const attestation = await generateAttestation(seed, request_hash);
+      const attestation = await generateAttestation(seed, rHash);
 
       // 3. Run commitment operations (non-blocking)
       const commitment = await runCommitments(
         seed,
-        request_hash || "",
+        rHash,
         attestation,
         "/v1/randomness",
         metadata,
@@ -605,6 +639,7 @@ app.post(
         timestamp: Date.now(),
         tee_type: TEE_TYPE,
         app_id: TEE_INFO.app_id,
+        request_hash: rHash,
         ...(commitment && { commitment }),
       });
     } catch (error) {
