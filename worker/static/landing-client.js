@@ -576,8 +576,6 @@ function log(msg, type = "info") {
         : type === "error"
           ? "#F87171"
           : "var(--text-muted)";
-    statusDot.style.boxShadow =
-      type === "success" ? "0 0 5px var(--success)" : "none";
   }
 }
 
@@ -1367,7 +1365,11 @@ document.addEventListener("DOMContentLoaded", () => {
     .then((data) => {
       const hashEl = document.getElementById("compose-hash");
       if (hashEl) {
-        hashEl.innerText = data.app_id ? data.app_id.slice(0, 8) : "N/A";
+        hashEl.innerText = data.compose_hash
+          ? data.compose_hash.slice(0, 8)
+          : data.app_id
+            ? data.app_id.slice(0, 8)
+            : "N/A";
       }
     })
     .catch(() => {

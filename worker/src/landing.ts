@@ -592,7 +592,7 @@ export function renderLandingPage(config: LandingConfig): string {
 
       <div class="hero-info">
         <h1>VERIFIABLE<br>RANDOMNESS<br>SERVICE</h1>
-        <div class="subtitle">POWERED BY INTEL TDX</div>
+        <div class="subtitle">POWERED BY MYSTERY GIFT</div>
       </div>
 
       <div class="miss-container" id="miss-container">
@@ -605,7 +605,7 @@ export function renderLandingPage(config: LandingConfig): string {
           <span class="env-badge ${envBadgeClass}">${envBadgeText}</span>
         </a>
         <div style="font-size:0.65rem; color:var(--text-muted); opacity:0.6;">
-          BETA SOFTWARE — Use at your own risk
+          EXPERIMENTAL SOFTWARE — Use at your own risk
         </div>
       </div>
     </div>
@@ -665,6 +665,16 @@ export function renderLandingPage(config: LandingConfig): string {
             </div>
           </div>
 
+          <div class="card" style="border-color: var(--accent-glow);">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="card-label" style="color:var(--accent); margin-bottom:0;">Pricing</span>
+              <div style="font-size:1.5rem; font-weight:700; color:var(--text-main);">$0.01 <span style="font-size:0.75rem; color:var(--text-muted);">/ req</span></div>
+            </div>
+            <div style="margin-top:0.5rem; font-size:0.7rem; color:var(--text-muted);">
+              Pay via x402 (SOLANA / BASE)
+            </div>
+          </div>
+
           <div class="card">
             <span class="card-label">Configuration</span>
 
@@ -704,11 +714,6 @@ export function renderLandingPage(config: LandingConfig): string {
               Compare this hash with <a href="https://github.com/mysterygiftdotfun/verifiable-randomness-service" target="_blank" style="color:var(--accent);">our source code</a> to verify we're running the exact code you expect.
             </p>
           </div>
-
-          <button class="std-btn" onclick="verify()" id="verify-btn">
-            Quick Verify (Self-Check)
-          </button>
-          <div id="verify-res" style="margin-top:0.5rem; display:none;"></div>
 
           <div class="card" style="margin-top:1rem; border-color:var(--accent-glow);">
             <span class="card-label" style="color:var(--accent);">Independent Verification</span>
@@ -801,7 +806,7 @@ export function renderLandingPage(config: LandingConfig): string {
               </div>
               <div style="margin-bottom:0.6rem; display:flex; gap:10px;">
                 <span style="color:var(--accent); font-weight:700;">2.</span>
-                <span>Choose operation type</span>
+                <span>Choose operation type (see below)</span>
               </div>
               <div style="display:flex; gap:10px;">
                 <span style="color:var(--accent); font-weight:700;">3.</span>
