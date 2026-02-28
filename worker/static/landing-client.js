@@ -775,8 +775,9 @@ async function generate() {
   if (genBtn) genBtn.disabled = true;
 
   try {
-    // Get operation type
     const opType = document.getElementById("op-type")?.value || "randomness";
+    const passphrase =
+      document.getElementById("in-passphrase")?.value || undefined;
 
     let endpoint = "/v1/randomness";
     let body = {};
@@ -824,6 +825,11 @@ async function generate() {
         .filter((s) => s);
       const count = parseInt(document.getElementById("in-count")?.value) || 1;
       body = { items, count };
+    }
+
+    // Add passphrase if provided
+    if (passphrase) {
+      body.passphrase = passphrase;
     }
 
     const opLabels = {
@@ -1174,7 +1180,6 @@ async function downloadAttestation() {
     const response = await fetch("/v1/attestation");
     const data = await response.json();
 
-    // Include all relevant attestation data
     const attestationData = {
       tee_type: data.tee_type,
       verified: data.verified,
@@ -1201,6 +1206,26 @@ async function downloadAttestation() {
     } else {
       throw new Error("No attestation available");
     }
+  } catch (e) {
+    log("Download failed: " + e.message, "error");
+  }
+}
+
+// Download Arweave proof (called from receipt modal)
+async function downloadArweaveProof(url) {
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = "arweave-proof.json";
+    a.click();
+    URL.revokeObjectURL(blobUrl);
+    log("Proof downloaded!", "success");
   } catch (e) {
     log("Download failed: " + e.message, "error");
   }
@@ -1292,9 +1317,20 @@ function showReceipt(data) {
       <div class="receipt-section-title">Arweave Proof</div>
       <div class="receipt-row">
         <span class="receipt-label">Transaction</span>
-        <a href="${data.commitment.arweave_url}" target="_blank" class="receipt-link">
-          ${(data.commitment.arweave_tx || data.commitment.arweave_tx_id)?.slice(0, 8) || "View"} <iconify-icon icon="ph:arrow-square-out-bold"></iconify-icon>
-        </a>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <a href="${data.commitment.arweave_url}" target="_blank" class="receipt-link">
+            ${(data.commitment.arweave_tx || data.commitment.arweave_tx_id)?.slice(0, 8) || "View"}...<iconify-icon icon="ph:arrow-square-out-bold"></iconify-icon>
+          </a>
+          <button onclick="downloadArweaveProof('${data.commitment.arweave_url}')"
+                  style="background:none; border:none; cursor:pointer; color:var(--text-muted); padding:0.25rem;"
+                  title="Download proof">
+            <iconify-icon icon="ph:download-simple-bold"></iconify-icon>
+          </button>
+        </div>
+      </div>
+      <div class="receipt-row">
+        <span class="receipt-label">Encrypted</span>
+        <span class="receipt-value">${data.commitment.encrypted ? "Yes" : "No"}</span>
       </div>
       <div class="receipt-row">
         <span class="receipt-label">Commitment Hash</span>

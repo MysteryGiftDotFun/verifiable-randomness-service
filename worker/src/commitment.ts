@@ -4,14 +4,25 @@ import { Keypair } from "@solana/web3.js";
 import { TurboFactory } from "@ardrive/turbo-sdk";
 import bs58 from "bs58";
 
+export interface RandomnessResult {
+  type:
+    | "randomness"
+    | "number"
+    | "dice"
+    | "pick"
+    | "shuffle"
+    | "winners"
+    | "uuid";
+  value: any;
+  params?: any;
+}
+
 export interface ArweaveCommitmentResult {
   arweave_tx_id: string;
   arweave_url: string;
+  encrypted: boolean;
 }
 
-/**
- * Compute SHA256(seed + requestHash) as a hex string
- */
 export function computeCommitmentHash(
   seed: string,
   requestHash: string,
@@ -23,9 +34,6 @@ export function computeCommitmentHash(
     .digest("hex");
 }
 
-/**
- * Upload the full proof payload to Arweave via Turbo SDK with on-demand SOL funding.
- */
 export async function commitToArweave(
   seed: string,
   attestation: string,
@@ -33,11 +41,12 @@ export async function commitToArweave(
   endpoint: string,
   appId: string,
   keypair: Keypair,
+  result: RandomnessResult,
   metadata?: Record<string, any>,
+  passphrase?: string,
 ): Promise<ArweaveCommitmentResult> {
   const commitmentHash = computeCommitmentHash(seed, requestHash);
 
-  // Extract quote_hex from attestation for easier verification
   let quoteHex: string | undefined;
   let eventLog: string | undefined;
   try {
@@ -48,15 +57,10 @@ export async function commitToArweave(
     if (decoded.event_log) {
       eventLog = decoded.event_log;
     }
-  } catch {
-    // If parsing fails, attestation might be raw quote
-  }
+  } catch {}
 
-  // PRIVACY: Do NOT include the raw seed in Arweave proofs.
-  // Users verify by computing SHA256(seed + request_hash) and comparing to commitment_hash.
-  // This allows proof verification without exposing the actual random output publicly.
   const payload = {
-    // seed intentionally omitted - verify via commitment_hash = SHA256(seed + request_hash)
+    randomness_result: result,
     attestation,
     quote_hex: quoteHex,
     event_log: eventLog,
@@ -79,27 +83,61 @@ export async function commitToArweave(
     token: "solana",
   });
 
-  const payloadBuffer = Buffer.from(JSON.stringify(payload));
+  let payloadBuffer: Buffer;
+  let tags: { name: string; value: string }[];
 
-  const result = await turbo.uploadFile({
+  if (passphrase) {
+    const iv = crypto.randomBytes(12);
+    const key = crypto.pbkdf2Sync(
+      passphrase,
+      "mystery-gift-rng",
+      100000,
+      32,
+      "sha256",
+    );
+    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+    const encrypted = Buffer.concat([
+      cipher.update(JSON.stringify(payload)),
+      cipher.final(),
+    ]);
+    const authTag = cipher.getAuthTag();
+    payloadBuffer = Buffer.concat([iv, authTag, encrypted]);
+
+    tags = [
+      { name: "Content-Type", value: "application/octet-stream" },
+      { name: "Encrypted", value: "true" },
+      { name: "Cipher", value: "AES-256-GCM" },
+      { name: "App-Name", value: "mystery-gift-rng" },
+      { name: "Commitment-Hash", value: commitmentHash },
+      { name: "TEE-Type", value: "tdx" },
+      { name: "Endpoint", value: endpoint },
+    ];
+    console.log(`[TEE] Arweave proof encrypted with passphrase`);
+  } else {
+    payloadBuffer = Buffer.from(JSON.stringify(payload));
+    tags = [
+      { name: "Content-Type", value: "application/json" },
+      { name: "App-Name", value: "mystery-gift-rng" },
+      { name: "Commitment-Hash", value: commitmentHash },
+      { name: "TEE-Type", value: "tdx" },
+      { name: "Endpoint", value: endpoint },
+    ];
+  }
+
+  const uploadResult = await turbo.uploadFile({
     fileStreamFactory: () => Readable.from(payloadBuffer),
     fileSizeFactory: () => payloadBuffer.length,
     dataItemOpts: {
-      tags: [
-        { name: "Content-Type", value: "application/json" },
-        { name: "App-Name", value: "mystery-gift-rng" },
-        { name: "Commitment-Hash", value: commitmentHash },
-        { name: "TEE-Type", value: "tdx" },
-        { name: "Endpoint", value: endpoint },
-      ],
+      tags,
     },
   });
 
-  const txId = result.id;
+  const txId = uploadResult.id;
   console.log(`[TEE] Arweave proof uploaded: ${txId}`);
 
   return {
     arweave_tx_id: txId,
     arweave_url: `https://arweave.net/${txId}`,
+    encrypted: !!passphrase,
   };
 }

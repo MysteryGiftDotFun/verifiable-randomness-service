@@ -11,6 +11,7 @@ import {
   commitToArweave,
   computeCommitmentHash,
   ArweaveCommitmentResult,
+  RandomnessResult,
 } from "./commitment.js";
 import { LRUCache } from "lru-cache";
 import Redis from "ioredis";
@@ -182,11 +183,14 @@ async function runCommitments(
   requestHash: string,
   attestation: string,
   endpoint: string,
+  result: RandomnessResult,
   metadata?: Record<string, any>,
+  passphrase?: string,
 ): Promise<{
   commitment_hash: string;
   arweave_tx: string | null;
   arweave_url: string | null;
+  encrypted: boolean;
 } | null> {
   if (!ARWEAVE_ENABLED) return null;
 
@@ -209,13 +213,16 @@ async function runCommitments(
       endpoint,
       appId,
       keypair,
+      result,
       metadata,
+      passphrase,
     );
 
     return {
       commitment_hash: commitmentHash,
       arweave_tx: arweaveResult.arweave_tx_id,
       arweave_url: arweaveResult.arweave_url,
+      encrypted: arweaveResult.encrypted,
     };
   } catch (e) {
     console.warn("[TEE] Arweave commitment failed:", e);
@@ -223,6 +230,7 @@ async function runCommitments(
       commitment_hash: commitmentHash,
       arweave_tx: null,
       arweave_url: null,
+      encrypted: false,
     };
   }
 }
@@ -588,11 +596,10 @@ app.post(
   apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
-      const { request_hash, metadata } = req.body;
+      const { request_hash, metadata, passphrase } = req.body;
 
       usageStats.totalRequests++;
 
-      // Generate request_hash from payment signature if not provided
       const paymentSignature =
         req.get("payment-signature") || req.get("x-payment");
       const rHash =
@@ -616,23 +623,27 @@ app.post(
         total: usageStats.totalRequests,
       });
 
-      // 1. Generate Secure Random Seed
       const randomBytes = crypto.randomBytes(32);
       const seed = randomBytes.toString("hex");
 
-      // 2. Generate Remote Attestation (The "Proof")
       const attestation = await generateAttestation(seed, rHash);
 
-      // 3. Run commitment operations (non-blocking)
+      const result: RandomnessResult = {
+        type: "randomness",
+        value: seed,
+        params: null,
+      };
+
       const commitment = await runCommitments(
         seed,
         rHash,
         attestation,
         "/v1/randomness",
+        result,
         metadata,
+        passphrase,
       );
 
-      // 4. Return the result
       res.json({
         random_seed: seed,
         attestation: attestation,
@@ -652,7 +663,7 @@ app.post(
 /**
  * POST /v1/random/number
  * Returns a random integer between min and max (inclusive)
- * Body: { min?: number, max: number, request_hash?: string }
+ * Body: { min?: number, max: number, request_hash?: string, passphrase?: string }
  */
 app.post(
   "/v1/random/number",
@@ -660,7 +671,7 @@ app.post(
   apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
-      const { min = 1, max, request_hash } = req.body;
+      const { min = 1, max, request_hash, passphrase } = req.body;
 
       if (typeof max !== "number" || max < 1) {
         res
@@ -676,27 +687,30 @@ app.post(
 
       usageStats.totalRequests++;
 
-      // Generate random bytes
       const randomBytes = crypto.randomBytes(32);
       const seed = randomBytes.toString("hex");
 
-      // Convert to number in range [min, max]
-      const bigInt = BigInt("0x" + seed.slice(0, 16)); // Use 64 bits
+      const bigInt = BigInt("0x" + seed.slice(0, 16));
       const range = BigInt(max - min + 1);
       const randomNumber = Number(bigInt % range) + min;
 
       const rHash = request_hash || `number:${min}-${max}`;
       const attestation = await generateAttestation(seed, rHash);
 
+      const result: RandomnessResult = {
+        type: "number",
+        value: randomNumber,
+        params: { min, max },
+      };
+
       const commitment = await runCommitments(
         seed,
         rHash,
         attestation,
         "/v1/random/number",
-        {
-          min,
-          max,
-        },
+        result,
+        undefined,
+        passphrase,
       );
 
       res.json({
@@ -719,7 +733,7 @@ app.post(
 /**
  * POST /v1/random/pick
  * Picks one random item from a provided list
- * Body: { items: any[], request_hash?: string }
+ * Body: { items: any[], request_hash?: string, passphrase?: string }
  */
 app.post(
   "/v1/random/pick",
@@ -727,7 +741,7 @@ app.post(
   apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
-      const { items, request_hash } = req.body;
+      const { items, request_hash, passphrase } = req.body;
 
       if (!Array.isArray(items) || items.length === 0) {
         res.status(400).json({ error: "items must be a non-empty array" });
@@ -746,7 +760,6 @@ app.post(
       const randomBytes = crypto.randomBytes(32);
       const seed = randomBytes.toString("hex");
 
-      // Pick random index
       const bigInt = BigInt("0x" + seed.slice(0, 16));
       const index = Number(bigInt % BigInt(items.length));
       const picked = items[index];
@@ -754,14 +767,20 @@ app.post(
       const rHash = request_hash || `pick:${items.length}`;
       const attestation = await generateAttestation(seed, rHash);
 
+      const result: RandomnessResult = {
+        type: "pick",
+        value: { item: picked, index },
+        params: { total_items: items.length },
+      };
+
       const commitment = await runCommitments(
         seed,
         rHash,
         attestation,
         "/v1/random/pick",
-        {
-          total_items: items.length,
-        },
+        result,
+        undefined,
+        passphrase,
       );
 
       res.json({
@@ -784,7 +803,7 @@ app.post(
 /**
  * POST /v1/random/shuffle
  * Shuffles a list using Fisher-Yates algorithm with TEE randomness
- * Body: { items: any[], request_hash?: string }
+ * Body: { items: any[], request_hash?: string, passphrase?: string }
  */
 app.post(
   "/v1/random/shuffle",
@@ -792,7 +811,7 @@ app.post(
   apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
-      const { items, request_hash } = req.body;
+      const { items, request_hash, passphrase } = req.body;
 
       if (!Array.isArray(items) || items.length === 0) {
         res.status(400).json({ error: "items must be a non-empty array" });
@@ -808,15 +827,12 @@ app.post(
 
       usageStats.totalRequests++;
 
-      // Generate enough random bytes for the shuffle
-      const bytesNeeded = Math.ceil(items.length * 4); // 4 bytes per swap decision
+      const bytesNeeded = Math.ceil(items.length * 4);
       const randomBytes = crypto.randomBytes(Math.max(32, bytesNeeded));
       const seed = randomBytes.slice(0, 32).toString("hex");
 
-      // Fisher-Yates shuffle using TEE randomness
       const shuffled = [...items];
       for (let i = shuffled.length - 1; i > 0; i--) {
-        // Use 4 bytes for each random choice
         const offset = (shuffled.length - 1 - i) * 4;
         const randomValue = randomBytes.readUInt32BE(
           offset % randomBytes.length,
@@ -828,14 +844,20 @@ app.post(
       const rHash = request_hash || `shuffle:${items.length}`;
       const attestation = await generateAttestation(seed, rHash);
 
+      const result: RandomnessResult = {
+        type: "shuffle",
+        value: shuffled,
+        params: { count: items.length },
+      };
+
       const commitment = await runCommitments(
         seed,
         rHash,
         attestation,
         "/v1/random/shuffle",
-        {
-          original_count: items.length,
-        },
+        result,
+        undefined,
+        passphrase,
       );
 
       res.json({
@@ -857,7 +879,7 @@ app.post(
 /**
  * POST /v1/random/winners
  * Pick multiple unique winners from a list
- * Body: { items: any[], count: number, request_hash?: string }
+ * Body: { items: any[], count: number, request_hash?: string, passphrase?: string }
  */
 app.post(
   "/v1/random/winners",
@@ -865,7 +887,7 @@ app.post(
   apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
-      const { items, count = 1, request_hash } = req.body;
+      const { items, count = 1, request_hash, passphrase } = req.body;
 
       if (!Array.isArray(items) || items.length === 0) {
         res.status(400).json({ error: "items must be a non-empty array" });
@@ -893,30 +915,23 @@ app.post(
 
       usageStats.totalRequests++;
 
-      // Generate enough randomness for selecting winners
-      const bytesNeeded = Math.ceil(count * 4); // 4 bytes per selection
+      const bytesNeeded = Math.ceil(count * 4);
       const randomBytes = crypto.randomBytes(Math.max(32, bytesNeeded));
       const seed = randomBytes.slice(0, 32).toString("hex");
 
-      // Use Fisher-Yates partial shuffle for deterministic, collision-free selection
-      // This is more efficient and reliable than reservoir sampling
       const itemsCopy = [...items];
       const winners: any[] = [];
 
       for (let i = 0; i < count; i++) {
-        // Use 4 bytes for each random selection
         const offset = i * 4;
         const randomValue = randomBytes.readUInt32BE(
           offset % randomBytes.length,
         );
 
-        // Select random index from remaining items
         const j = i + (randomValue % (itemsCopy.length - i));
 
-        // Swap selected item to position i
         [itemsCopy[i], itemsCopy[j]] = [itemsCopy[j], itemsCopy[i]];
 
-        // Add to winners with metadata
         winners.push({
           item: itemsCopy[i],
           index: items.indexOf(itemsCopy[i]),
@@ -927,15 +942,20 @@ app.post(
       const rHash = request_hash || `winners:${count}of${items.length}`;
       const attestation = await generateAttestation(seed, rHash);
 
+      const result: RandomnessResult = {
+        type: "winners",
+        value: winners,
+        params: { count: winners.length, total_items: items.length },
+      };
+
       const commitment = await runCommitments(
         seed,
         rHash,
         attestation,
         "/v1/random/winners",
-        {
-          count: winners.length,
-          total_items: items.length,
-        },
+        result,
+        undefined,
+        passphrase,
       );
 
       res.json({
@@ -958,7 +978,7 @@ app.post(
 /**
  * POST /v1/random/uuid
  * Generates a cryptographically secure UUIDv4
- * Body: { request_hash?: string }
+ * Body: { request_hash?: string, passphrase?: string }
  */
 app.post(
   "/v1/random/uuid",
@@ -966,17 +986,16 @@ app.post(
   apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
-      const { request_hash } = req.body;
+      const { request_hash, passphrase } = req.body;
 
       usageStats.totalRequests++;
 
       const randomBytes = crypto.randomBytes(32);
       const seed = randomBytes.toString("hex");
 
-      // Generate UUIDv4 from random bytes
       const uuidBytes = randomBytes.slice(0, 16);
-      uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40; // Version 4
-      uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80; // Variant 1
+      uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40;
+      uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80;
 
       const uuid = [
         uuidBytes.slice(0, 4).toString("hex"),
@@ -989,11 +1008,20 @@ app.post(
       const rHash = request_hash || `uuid`;
       const attestation = await generateAttestation(seed, rHash);
 
+      const result: RandomnessResult = {
+        type: "uuid",
+        value: uuid,
+        params: null,
+      };
+
       const commitment = await runCommitments(
         seed,
         rHash,
         attestation,
         "/v1/random/uuid",
+        result,
+        undefined,
+        passphrase,
       );
 
       res.json({
@@ -1014,7 +1042,7 @@ app.post(
 /**
  * POST /v1/random/dice
  * Roll dice (e.g., 2d6, 1d20)
- * Body: { dice: string (e.g., "2d6"), request_hash?: string }
+ * Body: { dice: string (e.g., "2d6"), request_hash?: string, passphrase?: string }
  */
 app.post(
   "/v1/random/dice",
@@ -1022,7 +1050,7 @@ app.post(
   apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
-      const { dice, request_hash } = req.body;
+      const { dice, request_hash, passphrase } = req.body;
 
       if (typeof dice !== "string") {
         res
@@ -1071,16 +1099,20 @@ app.post(
       const rHash = request_hash || `dice:${dice}`;
       const attestation = await generateAttestation(seed, rHash);
 
+      const result: RandomnessResult = {
+        type: "dice",
+        value: { total, rolls },
+        params: { dice, num_dice: numDice, sides },
+      };
+
       const commitment = await runCommitments(
         seed,
         rHash,
         attestation,
         "/v1/random/dice",
-        {
-          dice,
-          num_dice: numDice,
-          sides,
-        },
+        result,
+        undefined,
+        passphrase,
       );
 
       res.json({

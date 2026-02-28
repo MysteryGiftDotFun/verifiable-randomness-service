@@ -684,6 +684,15 @@ export function renderLandingPage(config: LandingConfig): string {
             </div>
           </div>
 
+          <div class="card">
+            <span class="card-label">Privacy Options</span>
+            <input type="text" class="sleek-input" id="in-passphrase" 
+                   placeholder="Optional: Passphrase to encrypt proof (leave empty for public)">
+            <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.25rem;">
+              If provided, the Arweave proof will be encrypted with AES-256-GCM. Share the passphrase with authorized parties.
+            </div>
+          </div>
+
           <!-- CYBERPUNK BUTTON -->
           <button class="cyber-btn" id="gen-btn" onclick="generate()" disabled>
             <iconify-icon icon="ph:lightning-fill"></iconify-icon> INITIALIZE RANDOMNESS
