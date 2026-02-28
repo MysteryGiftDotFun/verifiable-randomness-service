@@ -613,6 +613,7 @@ app.post("/v1/randomness", paidLimiter, async (req: Request, res: Response) => {
     );
 
     res.json({
+      operation: "randomness",
       random_seed: seed,
       attestation: attestation,
       timestamp: Date.now(),
@@ -680,6 +681,7 @@ app.post(
       );
 
       res.json({
+        operation: "number",
         number: randomNumber,
         min,
         max,
@@ -749,6 +751,7 @@ app.post(
       );
 
       res.json({
+        operation: "pick",
         picked,
         index,
         total_items: items.length,
@@ -825,6 +828,7 @@ app.post(
       );
 
       res.json({
+        operation: "shuffle",
         shuffled,
         original_count: items.length,
         random_seed: seed,
@@ -922,6 +926,7 @@ app.post(
       );
 
       res.json({
+        operation: "winners",
         winners,
         count: winners.length,
         total_items: items.length,
@@ -987,6 +992,7 @@ app.post(
       );
 
       res.json({
+        operation: "uuid",
         uuid,
         random_seed: seed,
         attestation,
@@ -1077,6 +1083,7 @@ app.post(
       );
 
       res.json({
+        operation: "dice",
         dice,
         rolls,
         total,

@@ -136,7 +136,7 @@ async function getPaymentRequirements() {
 
 function generateNonce() {
   const array = new Uint8Array(32);
-  crypto.randomBytes(array);
+  crypto.getRandomValues(array);
   return (
     "0x" +
     Array.from(array)
@@ -178,12 +178,6 @@ async function buildBasePayment(paymentReq, wallet) {
   };
 
   const types = {
-    EIP712Domain: [
-      { name: "name", type: "string" },
-      { name: "version", type: "string" },
-      { name: "chainId", type: "uint256" },
-      { name: "verifyingContract", type: "address" },
-    ],
     TransferWithAuthorization: [
       { name: "from", type: "address" },
       { name: "to", type: "address" },
@@ -195,10 +189,15 @@ async function buildBasePayment(paymentReq, wallet) {
   };
 
   console.log(`   Wallet: ${wallet.address}`);
-  console.log(`   Amount: $${parseInt(amount) / 10000} USDC`);
+  console.log(
+    `   Amount: $${parseInt(amount) / 1000000} USDC (raw: ${amount})`,
+  );
 
   const signature = await wallet.signTypedData(domain, types, message);
   console.log(`   Signature: ${signature.slice(0, 40)}...`);
+  console.log(`   PayTo: ${network.payTo}`);
+  console.log(`   Asset: ${network.asset}`);
+  console.log(`   ValidBefore: ${validBefore}`);
 
   const payload = {
     x402Version: 2,
@@ -214,6 +213,7 @@ async function buildBasePayment(paymentReq, wallet) {
       asset: network.asset,
       payTo: network.payTo,
       maxTimeoutSeconds: network.maxTimeoutSeconds,
+      extra: network.extra,
     },
     payload: {
       signature: signature,
@@ -377,6 +377,24 @@ async function submitWithPayment(paymentPayload) {
 
   console.log(`   HTTP Status: ${response.status}`);
 
+  // Debug: Log payment-required header if present
+  const paymentReqHeader =
+    response.headers.get("payment-required") ||
+    response.headers.get("PAYMENT-REQUIRED");
+  if (paymentReqHeader) {
+    try {
+      const paymentReq = JSON.parse(
+        Buffer.from(paymentReqHeader, "base64").toString(),
+      );
+      console.log(
+        `   Payment rejection details:`,
+        JSON.stringify(paymentReq, null, 2),
+      );
+    } catch (e) {
+      console.log(`   Payment rejection header: ${paymentReqHeader}`);
+    }
+  }
+
   if (!response.ok) {
     const error = await response.text();
     throw new Error(`Request failed: ${response.status} - ${error}`);
@@ -441,12 +459,37 @@ async function main() {
       }
     }
 
+    if (result.commitment) {
+      console.log("\n🔗 Arweave Commitment:");
+      console.log(`   Transaction: ${result.commitment.arweave_tx}`);
+      console.log(`   URL:        ${result.commitment.arweave_url}`);
+      console.log(`   Encrypted:  ${result.commitment.encrypted}`);
+      console.log(`   Hash:       ${result.commitment.commitment_hash}`);
+    }
+
+    console.log("\n📄 Full JSON Response (as API consumer receives):");
+    console.log(
+      "--------------------------------------------------------------------------------",
+    );
+    const displayResult = { ...result };
+    if (displayResult.attestation) {
+      try {
+        displayResult.attestation = JSON.parse(
+          Buffer.from(result.attestation, "base64").toString(),
+        );
+      } catch (e) {}
+    }
+    console.log(JSON.stringify(displayResult, null, 2));
+    console.log(
+      "--------------------------------------------------------------------------------",
+    );
+
     console.log(
       "\n================================================================================",
     );
     console.log("                    Test PASSED - x402 Payment Working!");
     console.log(
-      "================================================================================",
+      "\n================================================================================",
     );
 
     process.exit(0);
