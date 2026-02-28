@@ -71,7 +71,6 @@ const PORT = parseInt(process.env.PORT || "3000", 10);
 
 // Configuration
 const PRICE_PER_REQUEST_CENTS = 1; // $0.01 per attestation
-const API_KEYS = (process.env.API_KEYS || "").split(",").filter(Boolean);
 
 const PAYMENT_WALLET = (() => {
   const wallet = process.env.PAYMENT_WALLET;
@@ -127,7 +126,6 @@ let TEE_INFO: {
 
 // Arweave immutable proof configuration
 const ARWEAVE_ENABLED = process.env.ARWEAVE_ENABLED !== "false"; // Enabled by default
-const FREE_MODE = process.env.FREE_MODE === "true"; // Bypass payment for testing
 
 // TEE-derived commitment keypair (for Arweave uploads via Turbo SDK)
 let commitmentKeypair: Keypair | null = null;
@@ -375,7 +373,6 @@ let TEE_TYPE = "simulation";
 const usageStats = {
   totalRequests: 0,
   paidRequests: 0,
-  apiKeyRequests: 0,
   totalRevenueCents: 0,
 };
 
@@ -562,103 +559,73 @@ app.use(
 );
 
 /**
- * API Key authentication middleware (bypasses payment)
- */
-function apiKeyMiddleware(req: Request, res: Response, next: NextFunction) {
-  const apiKey = req.get("X-API-Key") || req.query.api_key;
-  if (apiKey && API_KEYS.includes(apiKey as string)) {
-    usageStats.apiKeyRequests++;
-    (req as any).paymentStatus = "api_key";
-    return next();
-  }
-  next();
-}
-
-/**
- * Free mode middleware - bypasses payment for testing
- */
-function freeModeMiddleware(req: Request, res: Response, next: NextFunction) {
-  if (FREE_MODE) {
-    (req as any).paymentStatus = "free_mode";
-    console.log(`[TEE] Free mode enabled - bypassing payment`);
-  }
-  next();
-}
-
-/**
  * POST /v1/randomness
  * Returns raw 256-bit random seed with attestation
  */
-app.post(
-  "/v1/randomness",
-  paidLimiter,
-  freeModeMiddleware,
-  apiKeyMiddleware,
-  async (req: Request, res: Response) => {
-    try {
-      const { request_hash, metadata, passphrase } = req.body;
+app.post("/v1/randomness", paidLimiter, async (req: Request, res: Response) => {
+  try {
+    const { request_hash, metadata, passphrase } = req.body;
 
-      usageStats.totalRequests++;
+    usageStats.totalRequests++;
 
-      const paymentSignature =
-        req.get("payment-signature") || req.get("x-payment");
-      const rHash =
-        request_hash ||
-        (paymentSignature
-          ? crypto
-              .createHash("sha256")
-              .update(paymentSignature)
-              .digest("hex")
-              .slice(0, 16)
-          : crypto
-              .createHash("sha256")
-              .update(JSON.stringify(req.body))
-              .digest("hex")
-              .slice(0, 16));
+    const paymentSignature =
+      req.get("payment-signature") || req.get("x-payment");
+    const rHash =
+      request_hash ||
+      (paymentSignature
+        ? crypto
+            .createHash("sha256")
+            .update(paymentSignature)
+            .digest("hex")
+            .slice(0, 16)
+        : crypto
+            .createHash("sha256")
+            .update(JSON.stringify(req.body))
+            .digest("hex")
+            .slice(0, 16));
 
-      console.log(`[TEE] Randomness request:`, {
-        payment: (req as any).paymentStatus,
-        metadata,
-        request_hash: rHash,
-        total: usageStats.totalRequests,
-      });
+    console.log(`[TEE] Randomness request:`, {
+      payment: (req as any).paymentStatus,
+      metadata,
+      request_hash: rHash,
+      total: usageStats.totalRequests,
+    });
 
-      const randomBytes = crypto.randomBytes(32);
-      const seed = randomBytes.toString("hex");
+    const randomBytes = crypto.randomBytes(32);
+    const seed = randomBytes.toString("hex");
 
-      const attestation = await generateAttestation(seed, rHash);
+    const attestation = await generateAttestation(seed, rHash);
 
-      const result: RandomnessResult = {
-        type: "randomness",
-        value: seed,
-        params: null,
-      };
+    const result: RandomnessResult = {
+      type: "randomness",
+      value: seed,
+      params: null,
+    };
 
-      const commitment = await runCommitments(
-        seed,
-        rHash,
-        attestation,
-        "/v1/randomness",
-        result,
-        metadata,
-        passphrase,
-      );
+    const commitment = await runCommitments(
+      seed,
+      rHash,
+      attestation,
+      "/v1/randomness",
+      result,
+      metadata,
+      passphrase,
+    );
 
-      res.json({
-        random_seed: seed,
-        attestation: attestation,
-        timestamp: Date.now(),
-        tee_type: TEE_TYPE,
-        app_id: TEE_INFO.app_id,
-        request_hash: rHash,
-        ...(commitment && { commitment }),
-      });
-    } catch (error) {
-      console.error("[TEE] Error generating randomness:", error);
-      res.status(500).json({ error: "Internal TEE Error" });
-    }
-  },
-);
+    res.json({
+      random_seed: seed,
+      attestation: attestation,
+      timestamp: Date.now(),
+      tee_type: TEE_TYPE,
+      app_id: TEE_INFO.app_id,
+      request_hash: rHash,
+      ...(commitment && { commitment }),
+    });
+  } catch (error) {
+    console.error("[TEE] Error generating randomness:", error);
+    res.status(500).json({ error: "Internal TEE Error" });
+  }
+});
 
 /**
  * POST /v1/random/number
@@ -668,7 +635,6 @@ app.post(
 app.post(
   "/v1/random/number",
   paidLimiter,
-  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { min = 1, max, request_hash, passphrase } = req.body;
@@ -738,7 +704,6 @@ app.post(
 app.post(
   "/v1/random/pick",
   paidLimiter,
-  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { items, request_hash, passphrase } = req.body;
@@ -808,7 +773,6 @@ app.post(
 app.post(
   "/v1/random/shuffle",
   paidLimiter,
-  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { items, request_hash, passphrase } = req.body;
@@ -884,7 +848,6 @@ app.post(
 app.post(
   "/v1/random/winners",
   paidLimiter,
-  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { items, count = 1, request_hash, passphrase } = req.body;
@@ -983,7 +946,6 @@ app.post(
 app.post(
   "/v1/random/uuid",
   paidLimiter,
-  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { request_hash, passphrase } = req.body;
@@ -1047,7 +1009,6 @@ app.post(
 app.post(
   "/v1/random/dice",
   paidLimiter,
-  apiKeyMiddleware,
   async (req: Request, res: Response) => {
     try {
       const { dice, request_hash, passphrase } = req.body;
@@ -1159,24 +1120,6 @@ app.get("/v1/health", (_req: Request, res: Response) => {
       "POST /v1/random/uuid - Generate UUIDv4",
       "POST /v1/random/dice - Roll dice (e.g., 2d6)",
     ],
-  });
-});
-
-/**
- * GET /v1/stats
- */
-app.get("/v1/stats", (req: Request, res: Response) => {
-  const apiKey = req.get("X-API-Key") || req.query.api_key;
-
-  if (!apiKey || !API_KEYS.includes(apiKey as string)) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-
-  res.json({
-    stats: usageStats,
-    uptime: process.uptime(),
-    tee_type: TEE_TYPE,
   });
 });
 
