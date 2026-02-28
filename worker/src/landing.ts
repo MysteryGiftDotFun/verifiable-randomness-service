@@ -533,14 +533,15 @@ export function renderLandingPage(config: LandingConfig): string {
 
     /* Responsive */
     @media (max-width: 1024px) {
+      body { overflow-y: auto; height: auto; }
       .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; overflow-y: auto; }
       .hero { height: 50vh; min-height: 400px; border-bottom: 1px solid var(--panel-border); justify-content: flex-end; }
       .miss-img { max-height: 450px; }
       .hero-info { top: auto; bottom: 2rem; left: 1.5rem; max-width: 80%; }
       .wallet-container-hero { top: 1.5rem; right: 1.5rem; }
       h1 { font-size: 2rem; }
-      .panel { min-height: 60vh; height: auto; overflow: visible; }
-      .content-wrapper { padding: 0 1.5rem 2rem; }
+      .panel { min-height: 60vh; height: auto; overflow-y: auto; }
+      .content-wrapper { padding: 0 1.5rem 2rem; overflow-y: visible; }
       .console-bar { display: none; }
     }
 
@@ -604,9 +605,6 @@ export function renderLandingPage(config: LandingConfig): string {
           v${version} &bull; <span id="version-hash">${composeHash.slice(0, 8)}</span>
           <span class="env-badge ${envBadgeClass}">${envBadgeText}</span>
         </a>
-        <div style="font-size:0.65rem; color:var(--text-muted); opacity:0.6;">
-          EXPERIMENTAL SOFTWARE — Use at your own risk
-        </div>
       </div>
     </div>
 
@@ -663,6 +661,11 @@ export function renderLandingPage(config: LandingConfig): string {
               <input type="text" class="sleek-input" id="in-winners-items" placeholder="Candidates (Comma separated)">
               <input type="number" class="sleek-input" id="in-count" placeholder="Number of Winners (Default: 1)">
             </div>
+
+            <!-- CYBERPUNK BUTTON -->
+            <button class="cyber-btn" id="gen-btn" onclick="generate()" disabled style="margin-top:1rem;">
+              <iconify-icon icon="ph:lightning-fill"></iconify-icon> INITIALIZE RANDOMNESS
+            </button>
           </div>
 
           <div class="card" style="border-color: var(--accent-glow);">
@@ -688,15 +691,10 @@ export function renderLandingPage(config: LandingConfig): string {
             <span class="card-label">Privacy Options</span>
             <input type="text" class="sleek-input" id="in-passphrase" 
                    placeholder="Optional: Passphrase to encrypt proof (leave empty for public)">
-            <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.25rem;">
-              If provided, the Arweave proof will be encrypted with AES-256-GCM. Share the passphrase with authorized parties.
-            </div>
+             <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.25rem;">
+               If provided, the Arweave proof will be encrypted with AES-256-GCM. Share the passphrase with authorized parties.
+             </div>
           </div>
-
-          <!-- CYBERPUNK BUTTON -->
-          <button class="cyber-btn" id="gen-btn" onclick="generate()" disabled>
-            <iconify-icon icon="ph:lightning-fill"></iconify-icon> INITIALIZE RANDOMNESS
-          </button>
         </div>
 
         <!-- VERIFY -->
@@ -769,7 +767,8 @@ export function renderLandingPage(config: LandingConfig): string {
           <div class="card">
             <span class="card-label">Overview</span>
             <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5;">
-              Intel TDX powered verifiable randomness. Secure, hardware-enforced generation with remote attestation proofs.
+              Intel TDX powered verifiable randomness. Secure, hardware-enforced generation with remote attestation proofs.<br><br>
+              <span style="color:#FF9500;">EXPERIMENTAL SOFTWARE — Use at your own risk</span>
             </p>
           </div>
 

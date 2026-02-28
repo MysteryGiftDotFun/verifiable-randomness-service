@@ -869,16 +869,8 @@ async function generate() {
 
       if (paymentHeader) {
         log("Payment required, processing...", "info");
-        console.log(
-          "Payment header received:",
-          paymentHeader.substring(0, 100) + "...",
-        );
 
         const paymentRequirements = JSON.parse(atob(paymentHeader));
-        console.log(
-          "Payment requirements:",
-          JSON.stringify(paymentRequirements).substring(0, 200) + "...",
-        );
 
         // Find matching payment method based on selected network
         const accept = paymentRequirements.accepts.find(
@@ -908,14 +900,6 @@ async function generate() {
 
         // Retry with payment - use PAYMENT-SIGNATURE header with base64 encoding
         const paymentPayload = btoa(JSON.stringify(payment));
-        console.log(
-          "Sending payment payload:",
-          JSON.stringify(payment, null, 2).substring(0, 500),
-        );
-        console.log(
-          "Payment header (base64):",
-          paymentPayload.substring(0, 100) + "...",
-        );
 
         response = await fetch(endpoint, {
           method: "POST",
@@ -925,14 +909,6 @@ async function generate() {
           },
           body: JSON.stringify(body),
         });
-
-        console.log("Payment response status:", response.status);
-        console.log(
-          "Payment response headers:",
-          [...response.headers.entries()]
-            .map((h) => h[0] + "=" + h[1])
-            .join(", "),
-        );
       }
     }
 
@@ -950,9 +926,6 @@ async function generate() {
             const paymentErr = JSON.parse(atob(paymentErrHeader));
             console.error("Payment error details:", paymentErr);
             errMsg = paymentErr.error || errMsg;
-            if (paymentErr.accepts) {
-              console.log("Available payment options:", paymentErr.accepts);
-            }
           } catch (e) {
             console.error("Could not decode payment error header");
           }
