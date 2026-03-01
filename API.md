@@ -33,7 +33,36 @@ Detailed API reference for the Verifiable Randomness Service.
 
 Visit **https://vrf.mysterygift.fun** - connect your wallet and click Generate.
 
-### Option 2: cURL (Command Line)
+### Option 2: CLI Tool (Node.js)
+
+For command-line programmatic testing with your private key:
+
+```bash
+# Clone the repository
+git clone https://github.com/MysteryGiftDotFun/verifiable-randomness-service.git
+cd verifiable-randomness-service/worker
+
+# Install dependencies
+npm install
+
+# Run with Base (EVM) - requires private key with USDC on Base
+NETWORK=base PRIVATE_KEY=0xYOUR_BASE_PRIVATE_KEY node test-x402-payment.cjs
+
+# Run with Solana - requires private key with USDC on Solana
+NETWORK=solana PRIVATE_KEY=YOUR_BASE58_PRIVATE_KEY node test-x402-payment.cjs
+
+# With custom VRF URL (for testing staging)
+VRF_URL=https://rng-dev.mysterygift.fun NETWORK=base PRIVATE_KEY=0x... node test-x402-payment.cjs
+```
+
+**Environment Variables:**
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NETWORK` | Yes | `base` or `solana` |
+| `PRIVATE_KEY` | Yes | Wallet private key (with `0x` prefix for Base) |
+| `VRF_URL` | No | VRF service URL (default: `https://vrf.mysterygift.fun`) |
+
+### Option 3: cURL (Command Line)
 
 ```bash
 # Random number with API key
@@ -43,7 +72,9 @@ curl -X POST https://vrf.mysterygift.fun/v1/random/number \
   -d '{"min": 1, "max": 100}'
 ```
 
-### Option 3: JavaScript/TypeScript
+**Note:** cURL cannot do x402 payments directly (requires cryptographic signing). Use the CLI tool above for command-line payments.
+
+### Option 4: JavaScript/TypeScript (API Key)
 
 ```javascript
 // Quick example - generates a random number
@@ -61,7 +92,7 @@ console.log(`Random number: ${data.number}`);
 // Output: { number: 42, min: 1, max: 100, operation: "number", random_seed: "...", attestation: "...", timestamp: ..., tee_type: "tdx" }
 ```
 
-### Option 4: Python
+### Option 5: Python
 
 ```python
 import requests
@@ -346,6 +377,155 @@ getRandomNumber(1, 100).then((result) => {
   console.log(`Operation: ${result.operation}`);
   // { number: 42, min: 1, max: 100, operation: "number", random_seed: "...", attestation: "...", timestamp: ..., tee_type: "tdx", commitment: {...} }
 });
+```
+
+### Complete Python Example (Base/EVM)
+
+```python
+"""
+VRF API Client with x402 Payment (Python)
+Requires: requests, web3
+Install: pip install requests web3
+"""
+import json
+import base64
+import time
+import secrets
+import requests
+from web3 import Web3
+
+# Configuration
+VRF_URL = "https://vrf.mysterygift.fun"
+PRIVATE_KEY = "0x..."  # Your Base wallet private key
+
+# Constants
+USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+PAYTO_BASE = "0x2d55488AD8dd2671c2F8D08FAad75908afa461c3"
+CHAIN_ID = 8453
+
+
+def generate_nonce():
+    """Generate random 32-byte nonce"""
+    return "0x" + secrets.token_hex(32)
+
+
+def build_typed_data(from_addr, to_addr, value, valid_after, valid_before, nonce):
+    """Build EIP-712 typed data for TransferWithAuthorization"""
+    return {
+        "domain": {
+            "name": "USD Coin",
+            "version": "2",
+            "chainId": CHAIN_ID,
+            "verifyingContract": USDC_BASE
+        },
+        "message": {
+            "from": from_addr,
+            "to": to_addr,
+            "value": str(value),
+            "validAfter": str(valid_after),
+            "validBefore": str(valid_before),
+            "nonce": nonce
+        },
+        "primaryType": "TransferWithAuthorization",
+        "types": {
+            "TransferWithAuthorization": [
+                {"name": "from", "type": "address"},
+                {"name": "to", "type": "address"},
+                {"name": "value", "type": "uint256"},
+                {"name": "validAfter", "type": "uint256"},
+                {"name": "validBefore", "type": "uint256"},
+                {"name": "nonce", "type": "bytes32"}
+            ]
+        }
+    }
+
+
+def get_random_number(min_val, max_val):
+    """
+    Get a random number with x402 payment
+    """
+    # Step 1: Request (expect 402)
+    resp = requests.post(
+        f"{VRF_URL}/v1/random/number",
+        headers={"Content-Type": "application/json"},
+        json={"min": min_val, "max": max_val}
+    )
+
+    if resp.status_code != 402:
+        return resp.json()
+
+    # Step 2: Get payment requirements
+    payment_header = resp.headers.get("payment-required")
+    payment_req = json.loads(base64.b64decode(payment_header))
+    accept = next(a for a in payment_req["accepts"] if a["network"].startswith("eip155"))
+
+    # Step 3: Sign with wallet
+    w3 = Web3()
+    wallet = w3.eth.account.from_key(PRIVATE_KEY)
+
+    valid_after = 0
+    valid_before = int(time.time()) + 300
+    nonce = generate_nonce()
+
+    typed_data = build_typed_data(
+        wallet.address, accept["payTo"], accept["amount"],
+        valid_after, valid_before, nonce
+    )
+
+    # Sign the typed data
+    signed = wallet.sign_typed_data(typed_data)
+
+    # Step 4: Build payment payload
+    payment_payload = {
+        "x402Version": 2,
+        "resource": {
+            "url": f"{VRF_URL}/v1/random/number",
+            "description": "Random Number Generation",
+            "mimeType": "application/json"
+        },
+        "accepted": {
+            "scheme": "exact",
+            "network": accept["network"],
+            "amount": accept["amount"],
+            "asset": accept["asset"],
+            "payTo": accept["payTo"],
+            "maxTimeoutSeconds": accept["maxTimeoutSeconds"],
+            "extra": accept.get("extra")
+        },
+        "payload": {
+            "signature": signed.signature.hex(),
+            "authorization": {
+                "from": wallet.address,
+                "to": accept["payTo"],
+                "value": accept["amount"],
+                "validAfter": str(valid_after),
+                "validBefore": str(valid_before),
+                "nonce": nonce
+            }
+        },
+        "extensions": {}
+    }
+
+    # Step 5: Submit with payment
+    resp = requests.post(
+        f"{VRF_URL}/v1/random/number",
+        headers={
+            "Content-Type": "application/json",
+            "PAYMENT-SIGNATURE": base64.b64encode(json.dumps(payment_payload).encode()).decode()
+        },
+        json={"min": min_val, "max": max_val}
+    )
+
+    return resp.json()
+
+
+# Usage
+if __name__ == "__main__":
+    result = get_random_number(1, 100)
+    print(f"Random: {result['number']}")
+    print(f"Range: {result['min']} - {result['max']}")
+    print(f"Operation: {result['operation']}")
+    print(f"Seed: {result['random_seed']}")
 ```
 
 ---
@@ -947,6 +1127,146 @@ def get_random_winners(items, count, api_key=None):
 winners = get_random_winners(['Alice', 'Bob', 'Charlie'], 2, 'your-api-key')
 for winner in winners:
     print(f"{winner['position']}. {winner['item']}")
+```
+
+### Node.js with x402 Payment (Server-Side)
+
+For server-side Node.js with ethers.js (not browser):
+
+```typescript
+/**
+ * VRF API Client with x402 Payment (Node.js)
+ * Works in server-side Node.js with ethers.js v6
+ *
+ * Install: npm install ethers axios
+ */
+import { ethers } from "ethers";
+import axios from "axios";
+
+const VRF_URL = "https://vrf.mysterygift.fun";
+const PRIVATE_KEY = process.env.VRF_PRIVATE_KEY || "0x..."; // Your Base wallet private key
+
+// Constants
+const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const CHAIN_ID = 8453;
+
+function generateNonce(): string {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return "0x" + Buffer.from(array).toString("hex");
+}
+
+async function getRandomNumber(min: number, max: number) {
+  // Step 1: Get payment requirements
+  let resp = await axios.post(
+    `${VRF_URL}/v1/random/number`,
+    { min, max },
+    { headers: { "Content-Type": "application/json" } },
+  );
+
+  if (resp.status !== 402) {
+    return resp.data;
+  }
+
+  // Decode payment requirements from header
+  const paymentReq = JSON.parse(
+    Buffer.from(resp.headers["payment-required"], "base64").toString(),
+  );
+  const accept = paymentReq.accepts.find((a: any) =>
+    a.network.startsWith("eip155"),
+  );
+
+  // Step 2: Build and sign authorization
+  const wallet = new ethers.Wallet(PRIVATE_KEY);
+  const validAfter = 0;
+  const validBefore = Math.floor(Date.now() / 1000) + 300;
+  const nonce = generateNonce();
+
+  const domain = {
+    name: "USD Coin",
+    version: "2",
+    chainId: CHAIN_ID,
+    verifyingContract: USDC_BASE,
+  };
+
+  const types = {
+    TransferWithAuthorization: [
+      { name: "from", type: "address" },
+      { name: "to", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "validAfter", type: "uint256" },
+      { name: "validBefore", type: "uint256" },
+      { name: "nonce", type: "bytes32" },
+    ],
+  };
+
+  const message = {
+    from: wallet.address,
+    to: accept.payTo,
+    value: accept.amount,
+    validAfter: validAfter.toString(),
+    validBefore: validBefore.toString(),
+    nonce,
+  };
+
+  // Sign the typed data
+  const signature = await wallet.signTypedData(domain, types, message);
+
+  // Step 3: Build payment payload
+  const paymentPayload = {
+    x402Version: 2,
+    resource: {
+      url: `${VRF_URL}/v1/random/number`,
+      description: "Random Number Generation",
+      mimeType: "application/json",
+    },
+    accepted: {
+      scheme: "exact",
+      network: accept.network,
+      amount: accept.amount,
+      asset: accept.asset,
+      payTo: accept.payTo,
+      maxTimeoutSeconds: accept.maxTimeoutSeconds,
+      extra: accept.extra,
+    },
+    payload: {
+      signature,
+      authorization: {
+        from: wallet.address,
+        to: accept.payTo,
+        value: accept.amount,
+        validAfter: validAfter.toString(),
+        validBefore: validBefore.toString(),
+        nonce,
+      },
+    },
+    extensions: {},
+  };
+
+  // Step 4: Submit with payment
+  const result = await axios.post(
+    `${VRF_URL}/v1/random/number`,
+    { min, max },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "PAYMENT-SIGNATURE": Buffer.from(
+          JSON.stringify(paymentPayload),
+        ).toString("base64"),
+      },
+    },
+  );
+
+  return result.data;
+}
+
+// Usage
+getRandomNumber(1, 100).then((result) => {
+  console.log(`Random: ${result.number}`);
+  console.log(`Operation: ${result.operation}`);
+  console.log(`Seed: ${result.random_seed}`);
+  console.log(`TEE: ${result.tee_type}`);
+});
 ```
 
 ### cURL
