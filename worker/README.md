@@ -220,7 +220,7 @@ For server-to-server API calls, build and sign transactions externally, then sub
 
 ```bash
 # Get payment requirements
-curl -X POST https://vrf.mysterygift.fun/v1/random/number \
+curl -X POST https://rng.mysterygift.fun/v1/random/number \
   -H "Content-Type: application/json" \
   -d '{"min": 1, "max": 100}'
 

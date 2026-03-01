@@ -1,8 +1,8 @@
 # API Documentation
 
-Detailed API reference for the Verifiable Randomness Service.
+Detailed API reference for the Verifiable Randomness (TEE) Service.
 
-**Base URL**: `https://vrf.mysterygift.fun`
+**Base URL**: `https://rng.mysterygift.fun`
 
 ---
 
@@ -31,7 +31,7 @@ Detailed API reference for the Verifiable Randomness Service.
 
 ### Option 1: Browser (Web UI)
 
-Visit **https://vrf.mysterygift.fun** - connect your wallet and click Generate.
+Visit **https://rng.mysterygift.fun** - connect your wallet and click Generate.
 
 ### Option 2: CLI Tool (Node.js)
 
@@ -52,7 +52,7 @@ NETWORK=base PRIVATE_KEY=0xYOUR_BASE_PRIVATE_KEY node test-x402-payment.cjs
 NETWORK=solana PRIVATE_KEY=YOUR_BASE58_PRIVATE_KEY node test-x402-payment.cjs
 
 # With custom VRF URL (for testing staging)
-VRF_URL=https://rng-dev.mysterygift.fun NETWORK=base PRIVATE_KEY=0x... node test-x402-payment.cjs
+RNG_URL=https://rng-dev.mysterygift.fun NETWORK=base PRIVATE_KEY=0x... node test-x402-payment.cjs
 ```
 
 **Environment Variables:**
@@ -60,29 +60,32 @@ VRF_URL=https://rng-dev.mysterygift.fun NETWORK=base PRIVATE_KEY=0x... node test
 |----------|----------|-------------|
 | `NETWORK` | Yes | `base` or `solana` |
 | `PRIVATE_KEY` | Yes | Wallet private key (with `0x` prefix for Base) |
-| `VRF_URL` | No | VRF service URL (default: `https://vrf.mysterygift.fun`) |
+| `RNG_URL` | No | Randomness service URL (default: `https://rng.mysterygift.fun`) |
 
-### Option 3: cURL (Command Line)
+### Option 3: cURL with x402 Payment
+
+cURL cannot sign transactions directly, but you can pre-build a payment and include it:
 
 ```bash
-# Random number with API key
-curl -X POST https://vrf.mysterygift.fun/v1/random/number \
+# First get payment requirements, then submit with payment
+# See x402 Payment Flow section for full details
+curl -X POST https://rng.mysterygift.fun/v1/random/number \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: your-api-key" \
+  -H "PAYMENT-SIGNATURE: <base64-encoded-payment-payload>" \
   -d '{"min": 1, "max": 100}'
 ```
 
-**Note:** cURL cannot do x402 payments directly (requires cryptographic signing). Use the CLI tool above for command-line payments.
+**Note:** For command-line testing, use the CLI tool (Option 2) instead.
 
-### Option 4: JavaScript/TypeScript (API Key)
+### Option 4: JavaScript/TypeScript
 
 ```javascript
-// Quick example - generates a random number
-const response = await fetch("https://vrf.mysterygift.fun/v1/random/number", {
+// Quick example - generates a random number via x402 payment
+const response = await fetch("https://rng.mysterygift.fun/v1/random/number", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
-    "X-API-Key": "your-api-key", // Or use x402 payment
+    // Payment handled via PAYMENT-SIGNATURE header (see x402 Payment Flow)
   },
   body: JSON.stringify({ min: 1, max: 100 }),
 });
@@ -97,12 +100,16 @@ console.log(`Random number: ${data.number}`);
 ```python
 import requests
 
+# For Python, use the x402 payment flow (see complete example below)
+# or use the CLI tool for simple testing
 response = requests.post(
-    "https://vrf.mysterygift.fun/v1/random/number",
-    headers={"X-API-Key": "your-api-key"},
+    "https://rng.mysterygift.fun/v1/random/number",
+    headers={"Content-Type": "application/json"},
     json={"min": 1, "max": 6}
 )
 
+# First request returns 402 - build payment and retry
+# See Python x402 example below for complete implementation
 data = response.json()
 print(f"Rolled: {data['number']}")  # e.g., Rolled: 4
 ```
@@ -111,24 +118,14 @@ print(f"Rolled: {data['number']}")  # e.g., Rolled: 4
 
 ## Authentication
 
-### Priority Order
+All requests require payment via the x402 protocol ($0.01 USDC per request). No API keys needed.
 
-1. **API Key** (highest priority) - Free access for partners
-2. **x402 Payment** - $0.01 per request
+### Payment Methods
 
-### API Key
+- **Base (EVM)**: Pay with USDC via MetaMask signature (EIP-3009)
+- **Solana**: Pay with USDC via Phantom transaction
 
-Include in request header:
-
-```http
-X-API-Key: your-secret-key
-```
-
----
-
-## x402 Payment Flow
-
-The **recommended** way for end users. No API keys needed - pay $0.01 per request via USDC.
+See the x402 Payment Flow section below for implementation details.
 
 ### How It Works
 
@@ -144,7 +141,7 @@ The **recommended** way for end users. No API keys needed - pay $0.01 per reques
 #### Step 1: Make Request (Get 402)
 
 ```bash
-curl -X POST https://vrf.mysterygift.fun/v1/random/number \
+curl -X POST https://rng.mysterygift.fun/v1/random/number \
   -H "Content-Type: application/json" \
   -d '{"min": 1, "max": 100}'
 ```
@@ -223,9 +220,9 @@ Build a transaction with facilitator as feePayer (see [X402-INTEGRATION.md](./X4
 #### Step 3: Submit with Payment
 
 ```bash
-curl -X POST https://vrf.mysterygift.fun/v1/random/number \
+curl -X POST https://rng.mysterygift.fun/v1/random/number \
   -H "Content-Type: application/json" \
-  -H "PAYMENT-SIGNATURE: $(echo '{"x402Version":2,"resource":{"url":"https://vrf.mysterygift.fun/v1/random/number","description":"Random Number Generation","mimeType":"application/json"},"accepted":{"scheme":"exact","network":"eip155:8453","amount":"10000","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","payTo":"0x2d55488AD8dd2671c2F8D08FAad75908afa461c3","maxTimeoutSeconds":300},"payload":{"signature":"0x...","authorization":{"from":"0x...","to":"0x2d55488AD8dd2671c2F8D08FAad75908afa461c3","value":"10000","validAfter":"0","validBefore":"...","nonce":"0x..."}},"extensions":{}}' | base64 -w0)" \
+  -H "PAYMENT-SIGNATURE: $(echo '{"x402Version":2,"resource":{"url":"https://rng.mysterygift.fun/v1/random/number","description":"Random Number Generation","mimeType":"application/json"},"accepted":{"scheme":"exact","network":"eip155:8453","amount":"10000","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","payTo":"0x2d55488AD8dd2671c2F8D08FAad75908afa461c3","maxTimeoutSeconds":300},"payload":{"signature":"0x...","authorization":{"from":"0x...","to":"0x2d55488AD8dd2671c2F8D08FAad75908afa461c3","value":"10000","validAfter":"0","validBefore":"...","nonce":"0x..."}},"extensions":{}}' | base64 -w0)" \
   -d '{"min": 1, "max": 100}'
 ```
 
@@ -237,7 +234,7 @@ curl -X POST https://vrf.mysterygift.fun/v1/random/number \
  * Works in browser with MetaMask
  */
 
-const VRF_URL = "https://vrf.mysterygift.fun";
+const VRF_URL = "https://rng.mysterygift.fun";
 const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 
 // Generate random 32-byte nonce
@@ -395,7 +392,7 @@ import requests
 from web3 import Web3
 
 # Configuration
-VRF_URL = "https://vrf.mysterygift.fun"
+VRF_URL = "https://rng.mysterygift.fun"
 PRIVATE_KEY = "0x..."  # Your Base wallet private key
 
 # Constants
@@ -585,7 +582,7 @@ For **server-to-server** API calls, build transactions externally - no RPC neede
 **Allowed Origins**:
 
 - `https://mysterygift.fun`
-- `https://vrf.mysterygift.fun`
+- `https://rng.mysterygift.fun`
 - `https://*.mysterygift.fun` (all subdomains)
 
 **Blocked**: All other origins receive no CORS headers
@@ -632,7 +629,7 @@ Generate a 256-bit cryptographically secure random seed.
 
 ```http
 POST /v1/randomness HTTP/1.1
-Host: vrf.mysterygift.fun
+Host: rng.mysterygift.fun
 Content-Type: application/json
 PAYMENT-SIGNATURE: <base64-encoded-x402-payload>
 
@@ -740,7 +737,7 @@ Generate a random integer between `min` and `max` (inclusive).
 **JavaScript**:
 
 ```javascript
-const response = await fetch("https://vrf.mysterygift.fun/v1/random/number", {
+const response = await fetch("https://rng.mysterygift.fun/v1/random/number", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -759,7 +756,7 @@ console.log(`Rolled: ${number}`);
 import requests
 
 response = requests.post(
-    'https://vrf.mysterygift.fun/v1/random/number',
+    'https://rng.mysterygift.fun/v1/random/number',
     headers={'X-Payment': f'x402 {payment_proof}'},
     json={'min': 0, 'max': 99}
 )
@@ -812,15 +809,10 @@ Roll dice using standard notation (e.g., "2d6", "1d20").
 #### Examples
 
 ```bash
-# Roll 3d6 with API key
-curl -X POST https://vrf.mysterygift.fun/v1/random/dice \
-  -H "X-API-Key: <key>" \
-  -d '{"dice": "3d6"}'
-
-# Roll d20 with x402 payment
-curl -X POST https://vrf.mysterygift.fun/v1/random/dice \
+# Roll 3d6 with x402 payment
+curl -X POST https://rng.mysterygift.fun/v1/random/dice \
   -H "PAYMENT-SIGNATURE: <base64-payload>" \
-  -d '{"dice": "1d20"}'
+  -d '{"dice": "3d6"}'
 ```
 
 ---
@@ -1033,30 +1025,40 @@ Health check endpoint.
 
 ## Code Examples
 
-### JavaScript/TypeScript
+### JavaScript/TypeScript (Browser with x402 Payment)
 
 ```typescript
-// Using API key (simplest - no wallet needed)
-async function getRandomNumber(min: number, max: number, apiKey: string) {
-  const response = await fetch("https://vrf.mysterygift.fun/v1/random/number", {
+// Full x402 payment flow - for browser with MetaMask
+async function getRandomNumber(min: number, max: number) {
+  // Step 1: Request (expect 402)
+  let response = await fetch("https://rng.mysterygift.fun/v1/random/number", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ min, max }),
+  });
+
+  if (response.status !== 402) {
+    return response.json(); // Free or already paid
+  }
+
+  // Step 2: Build payment (see complete example below)
+  const paymentPayload = await buildPaymentPayload(response.headers);
+
+  // Step 3: Submit with payment
+  response = await fetch("https://rng.mysterygift.fun/v1/random/number", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-API-Key": apiKey,
+      "PAYMENT-SIGNATURE": btoa(JSON.stringify(paymentPayload)),
     },
     body: JSON.stringify({ min, max }),
   });
 
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-  }
-
-  const data = await response.json();
-  return data;
+  return response.json();
 }
 
-// Usage with API key
-const result = await getRandomNumber(1, 100, "your-api-key");
+// Usage
+const result = await getRandomNumber(1, 100);
 console.log(`Random number: ${result.number}`); // e.g., 42
 console.log(`Range: ${result.min} - ${result.max}`); // 1 - 100
 console.log(`Operation: ${result.operation}`); // "number"
@@ -1070,7 +1072,7 @@ console.log(`TEE: ${result.tee_type}`); // "tdx"
 // Full x402 payment flow - for browser with MetaMask
 async function getRandomNumberWithPayment(min: number, max: number) {
   // Step 1: Request (expect 402)
-  let response = await fetch("https://vrf.mysterygift.fun/v1/random/number", {
+  let response = await fetch("https://rng.mysterygift.fun/v1/random/number", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ min, max }),
@@ -1084,7 +1086,7 @@ async function getRandomNumberWithPayment(min: number, max: number) {
   const paymentPayload = await buildPaymentPayload(response.headers);
 
   // Step 3: Submit with payment
-  response = await fetch("https://vrf.mysterygift.fun/v1/random/number", {
+  response = await fetch("https://rng.mysterygift.fun/v1/random/number", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1101,33 +1103,9 @@ const result = await getRandomNumberWithPayment(1, 6);
 console.log(`Dice roll: ${result.number}`); // e.g., 4
 ```
 
-### Python
+### Python (with x402 Payment)
 
-```python
-import requests
-import base64
-import json
-
-def get_random_winners(items, count, api_key=None):
-    headers = {'Content-Type': 'application/json'}
-
-    if api_key:
-        headers['X-API-Key'] = api_key
-
-    response = requests.post(
-        'https://vrf.mysterygift.fun/v1/random/winners',
-        headers=headers,
-        json={'items': items, 'count': count}
-    )
-
-    response.raise_for_status()
-    return response.json()['winners']
-
-# Usage
-winners = get_random_winners(['Alice', 'Bob', 'Charlie'], 2, 'your-api-key')
-for winner in winners:
-    print(f"{winner['position']}. {winner['item']}")
-```
+For Python x402 payment example, see the complete implementation in the x402 Payment Flow section above.
 
 ### Node.js with x402 Payment (Server-Side)
 
@@ -1143,7 +1121,7 @@ For server-side Node.js with ethers.js (not browser):
 import { ethers } from "ethers";
 import axios from "axios";
 
-const VRF_URL = "https://vrf.mysterygift.fun";
+const VRF_URL = "https://rng.mysterygift.fun";
 const PRIVATE_KEY = process.env.VRF_PRIVATE_KEY || "0x..."; // Your Base wallet private key
 
 // Constants
@@ -1271,63 +1249,25 @@ getRandomNumber(1, 100).then((result) => {
 
 ### cURL
 
+**Note:** cURL cannot sign x402 payments directly. Use the CLI tool or a programming library.
+
 ```bash
-# Random number with API key
-curl -X POST https://vrf.mysterygift.fun/v1/random/number \
+# Example: Get payment requirements (will return 402)
+curl -X POST https://rng.mysterygift.fun/v1/random/number \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
   -d '{"min": 1, "max": 100}'
 
-# Response:
+# Response (402 with payment requirements):
 # {
-#   "operation": "number",
-#   "number": 42,
-#   "min": 1,
-#   "max": 100,
-#   "random_seed": "a7f3c9d2e1b4f6c8a9e5d3b7c1f4e8a2d9b6c3f7e1a5d8b4c6f2e9a3d7b1c5f8",
-#   "attestation": "eyJ0eXBl...",
-#   "timestamp": 1704729600000,
-#   "tee_type": "tdx"
+#   "error": "Payment Required",
+#   "accepts": [...]
 # }
 
-# Roll dice (e.g., 2d6 = two 6-sided dice)
-curl -X POST https://vrf.mysterygift.fun/v1/random/dice \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
-  -d '{"dice": "2d6"}'
+# After building payment payload, submit with:
+# -H "PAYMENT-SIGNATURE: <base64-encoded-payload>"
 
-# Pick random winner from list
-curl -X POST https://vrf.mysterygift.fun/v1/random/pick \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
-  -d '{"items": ["Alice", "Bob", "Charlie", "David"]}'
-
-# Pick multiple winners
-curl -X POST https://vrf.mysterygift.fun/v1/random/winners \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
-  -d '{"items": ["Alice", "Bob", "Charlie", "David", "Eve"], "count": 2}'
-
-# Shuffle array
-curl -X POST https://vrf.mysterygift.fun/v1/random/shuffle \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
-  -d '{"items": ["A", "B", "C", "D", "E"]}'
-
-# Generate UUID
-curl -X POST https://vrf.mysterygift.fun/v1/random/uuid \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
-  -d '{}'
-
-# Generate random seed (256-bit)
-curl -X POST https://vrf.mysterygift.fun/v1/randomness \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
-  -d '{}'
-
-# Health check (no auth required)
-curl https://vrf.mysterygift.fun/v1/health
+# Health check (no payment required)
+curl https://rng.mysterygift.fun/v1/health
 ```
 
 ---
@@ -1364,12 +1304,12 @@ For programmatic access, build and sign the payment transaction externally:
 
 const paymentPayload = {
   x402Version: 2,
-  resource: { url: "https://vrf.mysterygift.fun/v1/randomness", ... },
+  resource: { url: "https://rng.mysterygift.fun/v1/randomness", ... },
   accepted: { scheme: "exact", network: "...", ... },
   payload: { transaction: "..." }  // or { signature: "...", authorization: {...} }
 };
 
-const result = await fetch("https://vrf.mysterygift.fun/v1/randomness", {
+const result = await fetch("https://rng.mysterygift.fun/v1/randomness", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",

@@ -15,7 +15,7 @@
  *   NETWORK=solana PRIVATE_KEY=your_solana_base58_key node test-x402-payment.js
  *
  *   # Specify custom VRF URL:
- *   VRF_URL=https://vrf.mysterygift.fun NETWORK=base PRIVATE_KEY=0x... node test-x402-payment.js
+ *   RNG_URL=https://vrf.mysterygift.fun NETWORK=base PRIVATE_KEY=0x... node test-x402-payment.js
  */
 
 const { ethers } = require("ethers");
@@ -31,7 +31,7 @@ const {
   createTransferCheckedInstruction,
 } = require("@solana/spl-token");
 
-const VRF_URL = process.env.VRF_URL || "https://vrf.mysterygift.fun";
+const RNG_URL = process.env.RNG_URL || "https://rng.mysterygift.fun";
 const NETWORK = (process.env.NETWORK || "base").toLowerCase();
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 
@@ -59,7 +59,7 @@ function validateEnv() {
     );
     console.log("\n  # With custom VRF URL:");
     console.log(
-      "  VRF_URL=https://vrf.mysterygift.fun NETWORK=base PRIVATE_KEY=0x... node test-x402-payment.js",
+      "  RNG_URL=https://vrf.mysterygift.fun NETWORK=base PRIVATE_KEY=0x... node test-x402-payment.js",
     );
     process.exit(1);
   }
@@ -103,7 +103,7 @@ async function getProviderAndWallet() {
 async function getPaymentRequirements() {
   console.log("\n📋 Step 1: Getting payment requirements...");
 
-  const response = await fetch(`${VRF_URL}/v1/random/number`, {
+  const response = await fetch(`${RNG_URL}/v1/random/number`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ min: 1, max: 100 }),
@@ -202,7 +202,7 @@ async function buildBasePayment(paymentReq, wallet) {
   const payload = {
     x402Version: 2,
     resource: {
-      url: `${VRF_URL}/v1/random/number`,
+      url: `${RNG_URL}/v1/random/number`,
       description: "Random Number Generation",
       mimeType: "application/json",
     },
@@ -339,7 +339,7 @@ async function buildSolanaPayment(paymentReq, connection, wallet) {
   const payload = {
     x402Version: 2,
     resource: {
-      url: `${VRF_URL}/v1/random/number`,
+      url: `${RNG_URL}/v1/random/number`,
       description: "Random Number Generation",
       mimeType: "application/json",
     },
@@ -364,7 +364,7 @@ async function buildSolanaPayment(paymentReq, connection, wallet) {
 async function submitWithPayment(paymentPayload) {
   console.log("\n🚀 Step 3: Submitting request with payment...");
 
-  const response = await fetch(`${VRF_URL}/v1/random/number`, {
+  const response = await fetch(`${RNG_URL}/v1/random/number`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -412,7 +412,7 @@ async function main() {
   console.log(
     "================================================================================",
   );
-  console.log(`VRF URL:  ${VRF_URL}`);
+  console.log(`VRF URL:  ${RNG_URL}`);
   console.log(`Network:  ${NETWORK.toUpperCase()}`);
   console.log(`Timestamp: ${new Date().toISOString()}`);
 

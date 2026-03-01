@@ -47,7 +47,7 @@ app.use(
       process.env.NODE_ENV === "production"
         ? [
             "https://mysterygift.fun",
-            "https://vrf.mysterygift.fun",
+            "https://rng.mysterygift.fun",
             /\.mysterygift\.fun$/,
           ]
         : [
@@ -1582,9 +1582,9 @@ app.get("/terms", (_req: Request, res: Response) => {
     <p>The Service operates on a pay-per-request model using the x402 protocol:</p>
     <ul>
       <li>Standard rate: $0.01 USD per request</li>
-      <li>Payments accepted in USDC or SOL on Solana</li>
+      <li>Payments accepted in USDC on Base or Solana</li>
       <li>All payments are final and non-refundable</li>
-      <li>API key holders may access the service without per-request payments</li>
+      <li>All requests require $0.01 USDC payment via x402 protocol</li>
     </ul>
     
     <h2>4. Permitted Use</h2>

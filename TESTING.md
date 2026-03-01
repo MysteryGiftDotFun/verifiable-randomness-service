@@ -1,6 +1,6 @@
-# VRF Service x402 Payment Testing Guide
+# Verifiable Randomness (TEE) Service x402 Payment Testing Guide
 
-This guide documents how to test the Verifiable Randomness Service (VRF) using the x402 payment protocol programmatically.
+This guide documents how to test the Verifiable Randomness (TEE) Service using the x402 payment protocol programmatically.
 
 ## Table of Contents
 
@@ -88,7 +88,7 @@ Note: Solana test requires additional setup with Solana web3.js. See [Solana Pay
 | ------------- | -------- | ------------------------------------------------------------- |
 | `PRIVATE_KEY` | Yes      | Wallet private key (0x prefix for Base, no prefix for Solana) |
 | `NETWORK`     | No       | `base` or `solana` (default: `base`)                          |
-| `VRF_URL`     | No       | VRF service URL (default: `https://vrf.mysterygift.fun`)      |
+| `RNG_URL`     | No       | VRF service URL (default: `https://rng.mysterygift.fun`)      |
 
 ### Expected Output
 
@@ -96,7 +96,7 @@ Note: Solana test requires additional setup with Solana web3.js. See [Solana Pay
 ================================================================================
                     VRF x402 Payment Test Script
 ================================================================================
-VRF URL:  https://vrf.mysterygift.fun
+VRF URL:  https://rng.mysterygift.fun
 Network:  BASE
 Timestamp: 2026-02-28T16:43:18.196Z
 Wallet:   0xYourWalletAddress
@@ -139,7 +139,7 @@ Wallet:   0xYourWalletAddress
 ### Step 1: Request Without Payment
 
 ```bash
-curl -s -i -X POST https://vrf.mysterygift.fun/v1/random/number \
+curl -s -i -X POST https://rng.mysterygift.fun/v1/random/number \
   -H "Content-Type: application/json" \
   -d '{"min": 1, "max": 100}'
 ```
@@ -150,7 +150,7 @@ Expected response: `HTTP/2 402` with `payment-required` header.
 
 ```bash
 # Extract and decode payment-required header
-PAYMENT_HEADER=$(curl -s -i -X POST https://vrf.mysterygift.fun/v1/random/number \
+PAYMENT_HEADER=$(curl -s -i -X POST https://rng.mysterygift.fun/v1/random/number \
   -H "Content-Type: application/json" \
   -d '{"min": 1, "max": 100}' 2>&1 | grep -i "payment-required:" | cut -d' ' -f2- | tr -d '\r')
 
@@ -164,7 +164,7 @@ This returns:
   "x402Version": 2,
   "error": "Payment required",
   "resource": {
-    "url": "https://vrf.mysterygift.fun/v1/random/number",
+    "url": "https://rng.mysterygift.fun/v1/random/number",
     "description": "Random Number Generation",
     "mimeType": "application/json"
   },
@@ -245,7 +245,7 @@ const signature = await wallet.signTypedData(domain, types, message);
 const paymentPayload = {
   x402Version: 2,
   resource: {
-    url: "https://vrf.mysterygift.fun/v1/random/number",
+    url: "https://rng.mysterygift.fun/v1/random/number",
     description: "Random Number Generation",
     mimeType: "application/json",
   },
@@ -275,7 +275,7 @@ const paymentPayload = {
 ### Step 4: Submit with Payment
 
 ```bash
-curl -s -X POST https://vrf.mysterygift.fun/v1/random/number \
+curl -s -X POST https://rng.mysterygift.fun/v1/random/number \
   -H "Content-Type: application/json" \
   -H "PAYMENT-SIGNATURE: $(echo $PAYLOAD_JSON | base64 -w0)" \
   -d '{"min": 1, "max": 100}'
@@ -287,7 +287,7 @@ curl -s -X POST https://vrf.mysterygift.fun/v1/random/number \
 
 The easiest way to test is via the browser UI:
 
-1. Visit: `https://vrf.mysterygift.fun`
+1. Visit: `https://rng.mysterygift.fun`
 2. Click "Connect Wallet"
    - For Base: Use MetaMask
    - For Solana: Use Phantom
@@ -320,7 +320,7 @@ All endpoints require x402 payment:
 ### Health Check (No Payment Required)
 
 ```bash
-curl https://vrf.mysterygift.fun/v1/health
+curl https://rng.mysterygift.fun/v1/health
 ```
 
 ---

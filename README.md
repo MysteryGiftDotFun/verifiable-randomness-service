@@ -1,4 +1,4 @@
-# Verifiable Randomness Service
+# Verifiable Randomness (TEE) Service
 
 TEE-powered verifiable randomness for the [Mystery Gift](https://mysterygift.fun) platform.
 
@@ -6,7 +6,7 @@ TEE-powered verifiable randomness for the [Mystery Gift](https://mysterygift.fun
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    vrf.mysterygift.fun                          │
+│                    rng.mysterygift.fun                          │
 │                  (Cloudflare Workers - Landing Page)            │
 ├─────────────────────────────────────────────────────────────────┤
 │  Landing Page UI    │    API Proxy (/v1/*)                      │
