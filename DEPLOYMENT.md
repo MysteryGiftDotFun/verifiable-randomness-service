@@ -1,31 +1,37 @@
-# Verifiable Randomness Service Deployment Guide
+# Verifiable Randomness Deployment
 
-## Deployment Status (Active)
+## Canonical Runtime
 
-- **CVM Name**: `verifiable-randomness-service`
-- **App ID**: `app_f040f9c288bbced3a380069c39795af27b8630de` (Deployed Jan 12 2026)
-- **Endpoint**: `https://app_f040f9c288bbced3a380069c39795af27b8630de-3000.dstack-pha-prod5.phala.network`
-- **Version**: `0.0.1-BETA`
+- service repo: `services/verifiable-randomness-service`
+- runtime path: `worker`
+- production compose: `worker/phala-compose.prod.yaml`
+- public endpoint: `https://rng.mysterygift.fun`
 
-## Quick Start
-
-Run the deployment script:
+## Deploy
 
 ```bash
-cd worker
-./scripts/quick-deploy.sh
+cd /Users/area/repos/mystery-gift/services/verifiable-randomness-service/worker
+phala deploy --compose phala-compose.prod.yaml -e .env
 ```
 
-## Manual Deployment
+## Required Environment
+
+- `PAYMENT_WALLET`
+- `HELIUS_RPC_URL`
+- `BASE_RPC_URL`
+
+Common production settings:
+
+- `PAYMENT_WALLET_BASE`
+- `X402_FACILITATOR_URL`
+- `SUPPORTED_NETWORKS`
+- `ARWEAVE_ENABLED`
+- `PHALA_APP_ID`
+- `PHALA_CLUSTER`
+- `REDIS_URL`
+
+## Verify
 
 ```bash
-# Login
-npx phala login
-
-# Deploy
-npx phala deploy --name verifiable-randomness-service --compose worker/phala-compose.yaml --vcpu 2 --memory 2G
+curl -sS https://rng.mysterygift.fun/v1/health
 ```
-
-## API Keys
-
-Generated on first deploy. Check your `.env` or deployment logs.
