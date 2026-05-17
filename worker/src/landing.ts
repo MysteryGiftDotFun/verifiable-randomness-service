@@ -79,6 +79,8 @@ export function renderLandingPage(config: LandingConfig): string {
   const baseWallet = paymentWalletBase || paymentWallet;
   const heliusRpc = heliusRpcUrl || "";
   const baseRpc = baseRpcUrl || "";
+  const identityFingerprint =
+    composeHash && composeHash !== "Loading..." ? composeHash : appId;
 
   return `
 <!DOCTYPE html>
@@ -602,7 +604,7 @@ export function renderLandingPage(config: LandingConfig): string {
 
       <div class="version-tag-container">
         <a href="/changelog" class="version-tag" style="cursor:pointer;">
-          v${version} &bull; <span id="version-hash">${composeHash.slice(0, 8)}</span>
+          v${version} &bull; <span id="version-hash">${identityFingerprint.slice(0, 8)}</span>
           <span class="env-badge ${envBadgeClass}">${envBadgeText}</span>
         </a>
       </div>
@@ -713,7 +715,7 @@ export function renderLandingPage(config: LandingConfig): string {
 
           <div class="card">
             <span class="card-label">System Identity</span>
-            <div class="hash-display" style="margin-bottom: 1rem; font-size:0.7rem;">APP_ID: ${appId}</div>
+            <div class="hash-display" id="tee-app-id" style="margin-bottom: 1rem; font-size:0.7rem;">APP_ID: ${appId}</div>
 
             <span class="card-label">Compose Hash (Code Fingerprint)</span>
             <div class="hash-display" id="compose-hash" style="font-size:0.7rem;">${composeHash}</div>

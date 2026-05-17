@@ -397,7 +397,7 @@ const X402EVM = {
   },
 
   // Create x402 payment payload using official format
-  async createPaymentPayload(provider, network, paymentRequirements) {
+  async createPaymentPayload(provider, network, paymentRequirements, resource) {
     // Note: x402 v2 response uses 'amount' not 'maxAmountRequired'
     // CRITICAL: Use ALL fields from server's payment requirements
     const { amount, asset, payTo, maxTimeoutSeconds, extra } =
@@ -445,17 +445,20 @@ const X402EVM = {
       );
     }
 
-    // Get the current page URL for the resource
-    const resourceUrl = window.location.origin + "/v1/randomness";
+    const paymentResource = resource || {
+      url: window.location.origin + "/v1/randomness",
+      description: "TEE Randomness Request",
+      mimeType: "application/json",
+    };
 
     // Return x402 v2 payment payload format
     // CRITICAL: Must include ALL required fields per x402 spec
     return {
       x402Version: 2,
       resource: {
-        url: resourceUrl,
-        description: "TEE Randomness Request",
-        mimeType: "application/json",
+        url: paymentResource.url,
+        description: paymentResource.description || "TEE Randomness Request",
+        mimeType: paymentResource.mimeType || "application/json",
       },
       accepted: {
         scheme: "exact",
@@ -576,6 +579,54 @@ function log(msg, type = "info") {
         : type === "error"
           ? "#F87171"
           : "var(--text-muted)";
+  }
+}
+
+function preferredErrorMessage(err, fallback = "Request failed") {
+  if (!err || typeof err !== "object") return fallback;
+
+  const message = typeof err.message === "string" ? err.message : "";
+  const error = typeof err.error === "string" ? err.error : "";
+
+  if (message && message !== "Payment required") return message;
+  if (error && error !== "Payment required") return error;
+  return message || error || fallback;
+}
+
+function updateTeeIdentity(data) {
+  const teeType = document.getElementById("tee-type");
+  const appId = document.getElementById("app-id");
+  const teeAppId = document.getElementById("tee-app-id");
+  const composeHash = document.getElementById("compose-hash");
+  const versionHash = document.getElementById("version-hash");
+
+  if (teeType) teeType.innerText = data.tee_type || "Simulation";
+  if (appId) appId.innerText = data.app_id || "N/A";
+  if (teeAppId) teeAppId.innerText = "APP_ID: " + (data.app_id || "N/A");
+
+  if (composeHash) {
+    const currentComposeHash = composeHash.innerText || "";
+    if (data.compose_hash) {
+      composeHash.innerText = data.compose_hash;
+    } else if (!currentComposeHash || currentComposeHash.startsWith("Loading")) {
+      composeHash.innerText = "Unavailable";
+    }
+  }
+
+  if (versionHash) {
+    const currentVersionHash = versionHash.innerText || "";
+    if (data.compose_hash) {
+      versionHash.innerText = data.compose_hash.slice(0, 8);
+    } else if (
+      data.app_id &&
+      (!currentVersionHash ||
+        currentVersionHash.startsWith("Loading") ||
+        currentVersionHash === "N/A")
+    ) {
+      versionHash.innerText = data.app_id.slice(0, 8);
+    } else if (!currentVersionHash) {
+      versionHash.innerText = "N/A";
+    }
   }
 }
 
@@ -871,6 +922,11 @@ async function generate() {
         log("Payment required, processing...", "info");
 
         const paymentRequirements = JSON.parse(atob(paymentHeader));
+        const paymentResource = paymentRequirements.resource || {
+          url: window.location.origin + endpoint,
+          description: opLabels[opType] || "TEE Randomness Request",
+          mimeType: "application/json",
+        };
 
         // Find matching payment method based on selected network
         const accept = paymentRequirements.accepts.find(
@@ -888,13 +944,14 @@ async function generate() {
         let payment;
         if (selectedNetwork === "solana") {
           // Use spl-token for Solana
-          payment = await createSolanaPayment(accept, body);
+          payment = await createSolanaPayment(accept, body, paymentResource);
         } else if (selectedNetwork === "base") {
           // Use x402 for EVM
           payment = await X402EVM.createPaymentPayload(
             window.ethereum,
             accept.network,
             accept,
+            paymentResource,
           );
         }
 
@@ -925,7 +982,7 @@ async function generate() {
           try {
             const paymentErr = JSON.parse(atob(paymentErrHeader));
             console.error("Payment error details:", paymentErr);
-            errMsg = paymentErr.error || errMsg;
+            errMsg = preferredErrorMessage(paymentErr, errMsg);
           } catch (e) {
             console.error("Could not decode payment error header");
           }
@@ -934,7 +991,7 @@ async function generate() {
 
       try {
         const err = JSON.parse(errText);
-        errMsg = err.error || err.message || errMsg;
+        errMsg = preferredErrorMessage(err, errMsg);
       } catch {
         errMsg = errText.substring(0, 200) || errMsg;
       }
@@ -969,7 +1026,7 @@ async function generate() {
 }
 
 // Create Solana payment using spl-token
-async function createSolanaPayment(paymentReq, body) {
+async function createSolanaPayment(paymentReq, body, resource) {
   const { Connection, PublicKey, Transaction, TransactionInstruction } =
     solanaWeb3;
 
@@ -1084,15 +1141,18 @@ async function createSolanaPayment(paymentReq, body) {
   });
   const base64 = btoa(String.fromCharCode(...new Uint8Array(serialized)));
 
-  // Get the current page URL for the resource
-  const resourceUrl = window.location.origin + "/v1/randomness";
+  const paymentResource = resource || {
+    url: window.location.origin + "/v1/randomness",
+    description: "TEE Randomness Request",
+    mimeType: "application/json",
+  };
 
   return {
     x402Version: 2,
     resource: {
-      url: resourceUrl,
-      description: "TEE Randomness Request",
-      mimeType: "application/json",
+      url: paymentResource.url,
+      description: paymentResource.description || "TEE Randomness Request",
+      mimeType: paymentResource.mimeType || "application/json",
     },
     accepted: {
       scheme: "exact",
@@ -1357,14 +1417,15 @@ document.addEventListener("DOMContentLoaded", () => {
   fetch("/v1/attestation")
     .then((r) => r.json())
     .then((data) => {
-      const teeType = document.getElementById("tee-type");
-      const appId = document.getElementById("app-id");
-      if (teeType) teeType.innerText = data.tee_type || "Simulation";
-      if (appId) appId.innerText = data.app_id || "N/A";
+      updateTeeIdentity(data);
     })
     .catch(() => {
       const teeType = document.getElementById("tee-type");
+      const composeHash = document.getElementById("compose-hash");
+      const versionHash = document.getElementById("version-hash");
       if (teeType) teeType.innerText = "Error";
+      if (composeHash) composeHash.innerText = "Failed to load";
+      if (versionHash) versionHash.innerText = "N/A";
     });
 })();
 
@@ -1372,17 +1433,12 @@ document.addEventListener("DOMContentLoaded", () => {
   fetch("/v1/health")
     .then((r) => r.json())
     .then((data) => {
-      const hashEl = document.getElementById("compose-hash");
-      if (hashEl) {
-        hashEl.innerText = data.compose_hash
-          ? data.compose_hash.slice(0, 8)
-          : data.app_id
-            ? data.app_id.slice(0, 8)
-            : "N/A";
-      }
+      updateTeeIdentity(data);
     })
     .catch(() => {
       const hashEl = document.getElementById("compose-hash");
+      const versionHash = document.getElementById("version-hash");
       if (hashEl) hashEl.innerText = "Failed to load";
+      if (versionHash) versionHash.innerText = "N/A";
     });
 })();

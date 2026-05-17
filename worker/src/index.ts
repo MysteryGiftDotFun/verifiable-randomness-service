@@ -124,6 +124,38 @@ let TEE_INFO: {
   instance_id: "",
 };
 
+let TEE_TYPE = "simulation";
+
+function applyDstackEventLog(eventLog?: string | null): void {
+  if (!eventLog) return;
+
+  try {
+    const events = JSON.parse(eventLog);
+    if (!Array.isArray(events)) return;
+
+    for (const event of events) {
+      if (
+        !event ||
+        typeof event.event !== "string" ||
+        typeof event.event_payload !== "string" ||
+        !event.event_payload
+      ) {
+        continue;
+      }
+
+      if (event.event === "compose-hash") {
+        TEE_INFO.compose_hash = event.event_payload;
+      } else if (event.event === "instance-id") {
+        TEE_INFO.instance_id = event.event_payload;
+      } else if (event.event === "app-id") {
+        TEE_INFO.app_id = event.event_payload;
+      }
+    }
+  } catch {
+    // Event log parsing failed; keep the last known identity values.
+  }
+}
+
 // Arweave immutable proof configuration
 const ARWEAVE_ENABLED = process.env.ARWEAVE_ENABLED !== "false"; // Enabled by default
 
@@ -366,8 +398,6 @@ if (!client) {
     "[TEE] dStack socket not found, client disabled (simulation mode)",
   );
 }
-
-let TEE_TYPE = "simulation";
 
 // Usage tracking (in-memory for now, use Redis/DB in production)
 const usageStats = {
@@ -1116,6 +1146,8 @@ app.get("/v1/health", (_req: Request, res: Response) => {
     x402_enabled: true,
     price_per_request: `$${(PRICE_PER_REQUEST_CENTS / 100).toFixed(2)}`,
     app_id: TEE_INFO.app_id,
+    compose_hash: TEE_INFO.compose_hash,
+    instance_id: TEE_INFO.instance_id,
     verification_available: TEE_TYPE === "tdx",
     arweave_enabled: ARWEAVE_ENABLED,
     endpoints: [
@@ -1190,37 +1222,14 @@ app.get("/v1/attestation", async (_req: Request, res: Response) => {
       return;
     }
 
-    // Parse event log to extract compose-hash and instance-id
-    let composeHash = TEE_INFO.compose_hash;
-    let instanceId = TEE_INFO.instance_id;
-
-    if (quote.event_log) {
-      try {
-        const events = JSON.parse(quote.event_log);
-        for (const event of events) {
-          if (event.event === "compose-hash") {
-            composeHash = event.event_payload;
-            TEE_INFO.compose_hash = composeHash;
-          }
-          if (event.event === "instance-id") {
-            instanceId = event.event_payload;
-            TEE_INFO.instance_id = instanceId;
-          }
-          if (event.event === "app-id") {
-            TEE_INFO.app_id = event.event_payload;
-          }
-        }
-      } catch {
-        // Event log parsing failed, use defaults
-      }
-    }
+    applyDstackEventLog(quote.event_log);
 
     res.json({
       tee_type: TEE_TYPE,
       verified: true,
       app_id: TEE_INFO.app_id,
-      compose_hash: composeHash,
-      instance_id: instanceId,
+      compose_hash: TEE_INFO.compose_hash,
+      instance_id: TEE_INFO.instance_id,
       quote_hex: quote.quote,
       event_log: quote.event_log,
       verification: {
@@ -1716,6 +1725,8 @@ async function generateAttestation(
     const quote = await dstack.getQuote(reportData);
 
     if (quote && quote.quote) {
+      applyDstackEventLog(quote.event_log);
+
       // Wrap the real quote in a JSON object to match the server's expected format
       // and provide additional verification data (event log, etc.)
       return Buffer.from(
@@ -1756,6 +1767,30 @@ async function generateAttestation(
   }
 }
 
+async function refreshTeeInfoFromQuote(dstack: DstackClient): Promise<void> {
+  try {
+    const reportData = crypto
+      .createHash("sha256")
+      .update("mystery-gift-rng-startup-identity")
+      .digest();
+    const quote = await Promise.race([
+      dstack.getQuote(reportData),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+    ]);
+
+    if (quote?.event_log) {
+      applyDstackEventLog(quote.event_log);
+      console.log("[TEE] TEE identity loaded from dStack event log", {
+        app_id: TEE_INFO.app_id,
+        compose_hash: TEE_INFO.compose_hash,
+        instance_id: TEE_INFO.instance_id,
+      });
+    }
+  } catch (error) {
+    console.warn("[TEE] Unable to pre-load TEE identity:", error);
+  }
+}
+
 // Start server
 async function start() {
   // Global error handler for uncaught exceptions
@@ -1776,6 +1811,7 @@ async function start() {
       if (info) {
         TEE_TYPE = "tdx";
         console.log("[TEE] dStack detected, running in TDX mode");
+        await refreshTeeInfoFromQuote(dstack);
       } else {
         console.log("[TEE] dStack not detected, running in simulation mode");
       }
