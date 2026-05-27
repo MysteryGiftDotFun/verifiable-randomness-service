@@ -1,6 +1,6 @@
 services:
   randomness-dev:
-    image: phantasybot/vrf-service:0.1.8-BETA
+    image: ghcr.io/thomasjvu/vrf-service:0.1.8-BETA
     ports:
       - "3000:3000"
     environment:
