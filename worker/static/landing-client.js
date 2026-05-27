@@ -494,7 +494,174 @@ const X402EVM = {
 // State
 let selectedNetwork = SUPPORTED_NETWORKS[0] || "solana";
 let wallet = null;
+let evmProvider = null;
+const discoveredEvmProviders = [];
 let consoleExpanded = false;
+
+const BASE_CHAIN_ID_HEX = "0x2105";
+const BASE_CHAIN_PARAMS = {
+  chainId: BASE_CHAIN_ID_HEX,
+  chainName: "Base",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: ["https://mainnet.base.org"],
+  blockExplorerUrls: ["https://basescan.org"],
+};
+
+function rememberEvmProvider(provider, info = {}) {
+  if (!provider || typeof provider.request !== "function") return;
+  if (discoveredEvmProviders.some((entry) => entry.provider === provider)) return;
+  discoveredEvmProviders.push({ provider, info });
+}
+
+function requestEvmProviders() {
+  try {
+    window.dispatchEvent(new Event("eip6963:requestProvider"));
+  } catch {
+    // EIP-6963 is optional; injected providers below are still supported.
+  }
+}
+
+window.addEventListener("eip6963:announceProvider", (event) => {
+  const detail = event.detail || {};
+  rememberEvmProvider(detail.provider, detail.info || {});
+});
+requestEvmProviders();
+document.addEventListener("DOMContentLoaded", requestEvmProviders);
+
+function getEthereumProvider() {
+  requestEvmProviders();
+
+  const candidates = [];
+  const injected = window.ethereum;
+  if (Array.isArray(injected?.providers)) {
+    candidates.push(...injected.providers);
+  }
+  if (injected) candidates.push(injected);
+  if (window.walletConnectProvider) candidates.push(window.walletConnectProvider);
+  if (window.coinbaseWallet) candidates.push(window.coinbaseWallet);
+  candidates.push(...discoveredEvmProviders.map((entry) => entry.provider));
+
+  const unique = candidates.filter(
+    (provider, index, list) =>
+      provider &&
+      typeof provider.request === "function" &&
+      list.indexOf(provider) === index,
+  );
+
+  return (
+    unique.find((provider) => provider.isMetaMask && !provider.isPhantom) ||
+    unique.find((provider) => provider.isMetaMask) ||
+    unique[0] ||
+    null
+  );
+}
+
+function walletErrorMessage(error) {
+  const code = error && (error.code || error?.data?.code);
+  const nestedMessage =
+    error &&
+    error.data &&
+    typeof error.data.message === "string" &&
+    error.data.message;
+  const message =
+    nestedMessage ||
+    (error && typeof error.message === "string" && error.message) ||
+    String(error || "Unknown wallet error");
+
+  if (code === 4001) return "Request rejected in wallet.";
+  if (code === -32002) {
+    return "A wallet request is already pending. Open MetaMask and finish or reject the existing request.";
+  }
+  if (code === -32603 || /internal error/i.test(message)) {
+    return (
+      "MetaMask returned an internal error. Unlock MetaMask, close any pending wallet popups, " +
+      "make sure the account is enabled for this site, then try again."
+    );
+  }
+
+  return code ? message + " (" + code + ")" : message;
+}
+
+async function ensureBaseNetwork(provider) {
+  if (!provider || selectedNetwork !== "base") return;
+
+  let chainId = null;
+  try {
+    chainId = await provider.request({ method: "eth_chainId" });
+  } catch {
+    return;
+  }
+
+  if (String(chainId).toLowerCase() === BASE_CHAIN_ID_HEX) return;
+
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: BASE_CHAIN_ID_HEX }],
+    });
+  } catch (switchError) {
+    if (switchError && switchError.code === 4902) {
+      await provider.request({
+        method: "wallet_addEthereumChain",
+        params: [BASE_CHAIN_PARAMS],
+      });
+      return;
+    }
+    throw switchError;
+  }
+}
+
+function setConnectedWallet(address) {
+  wallet = address;
+  const connectBtn = document.getElementById("connect-btn");
+  if (connectBtn) {
+    const prefix = selectedNetwork === "base" ? 6 : 4;
+    const separator = selectedNetwork === "base" ? "..." : "..";
+    connectBtn.innerText =
+      wallet.slice(0, prefix) + separator + wallet.slice(-4);
+    connectBtn.classList.add("connected");
+  }
+
+  const genBtn = document.getElementById("gen-btn");
+  if (genBtn) genBtn.disabled = false;
+}
+
+async function connectEvmWallet() {
+  const provider = getEthereumProvider();
+  if (!provider) {
+    log("No Ethereum wallet found. Install MetaMask.", "error");
+    return;
+  }
+
+  try {
+    const accounts = await provider.request({ method: "eth_requestAccounts" });
+    if (!accounts || accounts.length === 0) {
+      throw new Error("No account returned by wallet.");
+    }
+
+    evmProvider = provider;
+    setConnectedWallet(accounts[0]);
+    log(
+      "Wallet connected: " + wallet.slice(0, 6) + "..." + wallet.slice(-4),
+      "success",
+    );
+
+    try {
+      await ensureBaseNetwork(provider);
+    } catch (switchError) {
+      log(
+        "Wallet connected, but Base network switch failed: " +
+          walletErrorMessage(switchError),
+        "error",
+      );
+    }
+  } catch (error) {
+    evmProvider = null;
+    wallet = null;
+    log("Wallet connection failed: " + walletErrorMessage(error), "error");
+    console.error("Wallet connection error:", error);
+  }
+}
 
 function initHeroParallax() {
   const hero = document.getElementById("hero-section");
@@ -686,61 +853,13 @@ async function initNetwork() {
         await window.solana.disconnect();
       } catch (e) {}
       const r = await window.solana.connect();
-      wallet = r.publicKey.toString();
-      const connectBtn = document.getElementById("connect-btn");
-      if (connectBtn) {
-        connectBtn.innerText = wallet.slice(0, 4) + ".." + wallet.slice(-4);
-        connectBtn.classList.add("connected");
-      }
-      const genBtn = document.getElementById("gen-btn");
-      if (genBtn) genBtn.disabled = false;
+      setConnectedWallet(r.publicKey.toString());
       log("Connected: " + wallet, "success");
     } catch (e) {
       log("Connection failed: " + e.message, "error");
     }
   } else if (selectedNetwork === "base") {
-    let ethProvider = window.ethereum;
-    if (!ethProvider) {
-      if (window.walletConnectProvider) {
-        ethProvider = window.walletConnectProvider;
-      } else if (window.coinbaseWallet) {
-        ethProvider = window.coinbaseWallet;
-      }
-    }
-
-    if (!ethProvider) {
-      try {
-        const accounts = await window.ethereum?.request({
-          method: "eth_requestAccounts",
-        });
-        if (accounts && accounts.length > 0) {
-          ethProvider = window.ethereum;
-        }
-      } catch (e) {}
-    }
-
-    if (!ethProvider) {
-      log("No EVM wallet found. Install MetaMask.", "error");
-    } else {
-      try {
-        const accounts = await ethProvider.request({
-          method: "eth_requestAccounts",
-        });
-        if (accounts && accounts.length > 0) {
-          wallet = accounts[0];
-          const connectBtn = document.getElementById("connect-btn");
-          if (connectBtn) {
-            connectBtn.innerText = wallet.slice(0, 4) + ".." + wallet.slice(-4);
-            connectBtn.classList.add("connected");
-          }
-          const genBtn = document.getElementById("gen-btn");
-          if (genBtn) genBtn.disabled = false;
-          log("Connected: " + wallet, "success");
-        }
-      } catch (e) {
-        log("No EVM wallet found. Install MetaMask.", "error");
-      }
-    }
+    await connectEvmWallet();
   } else {
     log("Unsupported network: " + selectedNetwork, "error");
   }
@@ -792,6 +911,7 @@ function setNetwork(network) {
   }
   if (genBtn) genBtn.disabled = true;
   wallet = null;
+  evmProvider = null;
   log("Network changed to " + network.toUpperCase());
 }
 
@@ -802,6 +922,7 @@ async function toggleWallet() {
       if (window.solana?.disconnect) await window.solana.disconnect();
     } catch (e) {}
     wallet = null;
+    evmProvider = null;
     const connectBtn = document.getElementById("connect-btn");
     const genBtn = document.getElementById("gen-btn");
     if (connectBtn) {
@@ -823,14 +944,7 @@ async function toggleWallet() {
           await window.solana.disconnect();
         } catch (e) {}
         const r = await window.solana.connect();
-        wallet = r.publicKey.toString();
-        const connectBtn = document.getElementById("connect-btn");
-        if (connectBtn) {
-          connectBtn.innerText = wallet.slice(0, 4) + ".." + wallet.slice(-4);
-          connectBtn.classList.add("connected");
-        }
-        const genBtn = document.getElementById("gen-btn");
-        if (genBtn) genBtn.disabled = false;
+        setConnectedWallet(r.publicKey.toString());
         log(
           "Wallet connected: " + wallet.slice(0, 6) + "..." + wallet.slice(-4),
         );
@@ -838,26 +952,7 @@ async function toggleWallet() {
         log("Wallet connection failed: " + e.message, "error");
       }
     } else if (selectedNetwork === "base") {
-      if (!window.ethereum)
-        return log("No Ethereum wallet found. Install MetaMask.", "error");
-      try {
-        const accounts = await window.ethereum.request({
-          method: "eth_requestAccounts",
-        });
-        wallet = accounts[0];
-        const connectBtn = document.getElementById("connect-btn");
-        if (connectBtn) {
-          connectBtn.innerText = wallet.slice(0, 6) + "..." + wallet.slice(-4);
-          connectBtn.classList.add("connected");
-        }
-        const genBtn = document.getElementById("gen-btn");
-        if (genBtn) genBtn.disabled = false;
-        log(
-          "Wallet connected: " + wallet.slice(0, 6) + "..." + wallet.slice(-4),
-        );
-      } catch (e) {
-        log("Wallet connection failed: " + e.message, "error");
-      }
+      await connectEvmWallet();
     }
   }
 }
@@ -989,9 +1084,12 @@ async function generate() {
           // Use spl-token for Solana
           payment = await createSolanaPayment(accept, body, paymentResource);
         } else if (selectedNetwork === "base") {
+          const provider = evmProvider || getEthereumProvider();
+          if (!provider) throw new Error("No Ethereum wallet connected.");
+          await ensureBaseNetwork(provider);
           // Use x402 for EVM
           payment = await X402EVM.createPaymentPayload(
-            window.ethereum,
+            provider,
             accept.network,
             accept,
             paymentResource,
