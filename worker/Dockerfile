@@ -5,10 +5,6 @@ WORKDIR /app
 # Install curl for healthcheck
 RUN apt-get update --allow-insecure-repositories && apt-get install -y --allow-unauthenticated curl jq && rm -rf /var/lib/apt/lists/*
 
-# Create non-root runtime user early. The app only needs read access to /app,
-# so avoid a recursive chown layer that makes every image push very large.
-RUN useradd -m -s /bin/bash appuser
-
 # Install dependencies
 COPY package.json .
 COPY tsconfig.json .
@@ -30,6 +26,9 @@ RUN mkdir -p dist/static && cp static/*.js dist/static/ && ls -la dist/
 # Remove dev dependencies
 RUN npm prune --production
 
+# Create non-root runtime user. The app only needs read access to /app,
+# so avoid a recursive chown layer that makes every image push very large.
+RUN useradd -m -s /bin/bash appuser
 USER appuser
 
 ENV PORT=3000
