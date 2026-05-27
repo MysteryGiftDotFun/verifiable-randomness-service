@@ -496,6 +496,49 @@ let selectedNetwork = SUPPORTED_NETWORKS[0] || "solana";
 let wallet = null;
 let consoleExpanded = false;
 
+function initHeroParallax() {
+  const hero = document.getElementById("hero-section");
+  if (!hero) return;
+
+  const reduceMotion =
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduceMotion || window.innerWidth <= 1024) {
+    hero.style.backgroundPosition = "50% 50%";
+    return;
+  }
+
+  let frame = 0;
+  const setPosition = (clientX, clientY) => {
+    if (frame) cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      const rect = hero.getBoundingClientRect();
+      const x = ((clientX - rect.left) / rect.width - 0.5) * 18;
+      const y = ((clientY - rect.top) / rect.height - 0.5) * 18;
+      hero.style.backgroundPosition =
+        "calc(50% - " + x.toFixed(2) + "px) calc(50% - " + y.toFixed(2) + "px)";
+      frame = 0;
+    });
+  };
+
+  hero.addEventListener(
+    "mousemove",
+    (event) => setPosition(event.clientX, event.clientY),
+    { passive: true },
+  );
+  hero.addEventListener(
+    "mouseleave",
+    () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      hero.style.backgroundPosition = "50% 50%";
+    },
+    { passive: true },
+  );
+}
+
+document.addEventListener("DOMContentLoaded", initHeroParallax);
+
 function toggleDropdown() {
   const dropdown = document.getElementById("op-dropdown");
   if (dropdown) dropdown.classList.toggle("open");

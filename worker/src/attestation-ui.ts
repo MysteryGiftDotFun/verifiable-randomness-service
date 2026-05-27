@@ -6,7 +6,7 @@ export function renderTeeAttestationStyles(): string {
     .attestation-dot { width:8px; height:8px; border-radius:999px; background:var(--text-muted); box-shadow:0 0 14px currentColor; }
     .attestation-pill.verified .attestation-dot { background:#34D399; }
     .attestation-pill.failed .attestation-dot { background:#F87171; }
-    .tee-status-card { border-color:rgba(52,211,153,0.24); background:linear-gradient(135deg, rgba(52,211,153,0.08), rgba(0,0,0,0.2)); }
+    .tee-status-card { border-color:var(--accent-glow); background:linear-gradient(135deg, rgba(255,77,0,0.1), rgba(0,0,0,0.2)); }
     .tee-status-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin-bottom:0.9rem; }
     .tee-status-title { font-size:0.95rem; color:var(--text-main); font-weight:700; margin-bottom:0.25rem; }
     .tee-status-detail { font-size:0.75rem; color:var(--text-muted); line-height:1.45; }
@@ -20,6 +20,15 @@ export function renderTeeAttestationStyles(): string {
     .tee-check-value.failed { color:#F87171; }
     .tee-check-value.unknown { color:#FBBF24; }
     .tee-status-actions { display:flex; gap:0.6rem; margin-top:0.9rem; flex-wrap:wrap; }
+    .tee-status-actions .std-btn { flex:1 1 9rem; min-width:0; }
+    .tee-quote-actions { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0.6rem; margin-top:0.6rem; }
+    .tee-quote-actions .std-btn { width:100%; min-width:0; }
+    .tee-quote-head { display:flex; align-items:center; justify-content:space-between; gap:0.75rem; margin:0.95rem 0 0.4rem; }
+    .tee-quote-label { color:var(--text-muted); font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; }
+    .tee-quote-meta { color:var(--text-muted); font-size:0.68rem; text-align:right; }
+    .tee-quote-snippet { max-height:180px; overflow:auto; margin:0; padding:0.75rem; border:1px solid var(--panel-border); border-radius:8px; background:rgba(0,0,0,0.42); color:var(--text-main); font-size:0.68rem; line-height:1.45; white-space:pre-wrap; word-break:break-all; }
+    .tee-quote-code { font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    @media (max-width:420px) { .tee-quote-actions { grid-template-columns:1fr; } }
     .tee-link { color:var(--accent); text-decoration:none; font-size:0.75rem; }
     .tee-link:hover { text-decoration:underline; }
   `;
@@ -74,9 +83,26 @@ export function renderTeeAttestationAuditCard(): string {
               This check generates a fresh TDX quote, verifies the hardware signature, confirms the running service identity, and binds the quote to a nonce.
             </p>
             <div id="verify-res" class="hash-display" style="font-size:0.72rem; margin-bottom:0.8rem;">Verification is running automatically.</div>
-            <button class="std-btn" style="width:100%;" onclick="verify()">
-              <iconify-icon icon="ph:seal-check-fill" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
-              Verify Again
-            </button>
+            <div class="tee-status-actions">
+              <button class="std-btn" onclick="window.TeeAttestation.verify()">
+                <iconify-icon icon="ph:seal-check-fill" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
+                Verify Again
+              </button>
+            </div>
+            <div class="tee-quote-actions">
+              <button class="std-btn" onclick="window.TeeAttestation.download()">
+                <iconify-icon icon="ph:download-simple-bold" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
+                Download Attestation Quote
+              </button>
+              <button class="std-btn" onclick="window.TeeAttestation.copyQuote()">
+                <iconify-icon icon="ph:copy-simple-bold" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
+                Copy Quote
+              </button>
+            </div>
+            <div class="tee-quote-head">
+              <span class="tee-quote-label">TDX Quote Hex</span>
+              <span class="tee-quote-meta" id="attestation-quote-meta">Waiting for live quote</span>
+            </div>
+            <pre class="tee-quote-snippet"><code class="tee-quote-code" id="attestation-quote-code">Waiting for live attestation quote...</code></pre>
           </div>`;
 }

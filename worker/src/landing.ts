@@ -10,8 +10,6 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import {
   renderTeeAttestationAuditCard,
-  renderTeeAttestationPill,
-  renderTeeAttestationStatusCard,
   renderTeeAttestationStyles,
 } from "./attestation-ui.js";
 
@@ -154,6 +152,7 @@ export function renderLandingPage(config: LandingConfig): string {
       overflow: hidden;
       background-color: var(--bg);
       background-image: url("data:image/svg+xml,%3Csvg width='400' height='400' viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cstyle%3Etext { font-family: monospace; fill: %23ffffff; opacity: 0.02; font-weight: bold; user-select: none; }%3C/style%3E%3Ctext x='50' y='80' font-size='120' transform='rotate(15 50,80)'%3E?%3C/text%3E%3Ctext x='300' y='150' font-size='80' transform='rotate(-20 300,150)'%3E?%3C/text%3E%3Ctext x='150' y='300' font-size='160' transform='rotate(10 150,300)'%3E?%3C/text%3E%3Ctext x='350' y='350' font-size='60' transform='rotate(30 350,350)'%3E?%3C/text%3E%3Ctext x='100' y='200' font-size='40' opacity='0.04' transform='rotate(-45 100,200)'%3E?%3C/text%3E%3Ctext x='250' y='50' font-size='90' transform='rotate(5 250,50)'%3E?%3C/text%3E%3Ctext x='20' y='380' font-size='70' transform='rotate(-15 20,380)'%3E?%3C/text%3E%3C/svg%3E");
+      background-position: 50% 50%;
       transition: background-position 0.1s linear;
     }
 
@@ -594,8 +593,6 @@ ${renderTeeAttestationStyles()}
   <div class="layout">
     <!-- Hero -->
     <div class="hero" id="hero-section">
-${renderTeeAttestationPill()}
-
       <div class="wallet-container-hero">
         <button class="wallet-btn" id="connect-btn" onclick="toggleWallet()">
           <iconify-icon icon="ph:wallet-fill"></iconify-icon> CONNECT WALLET
@@ -635,10 +632,7 @@ ${renderTeeAttestationPill()}
 
         <!-- RUN -->
         <div id="v-run" class="tab-view active">
-${renderTeeAttestationStatusCard()}
-
           <div class="card">
-            <span class="card-label">Operation Type</span>
             <div class="custom-dropdown" id="op-dropdown">
               <div class="dropdown-selected" onclick="toggleDropdown()">Raw Randomness (Seed)</div>
               <div class="dropdown-options">
@@ -692,8 +686,6 @@ ${renderTeeAttestationStatusCard()}
           </div>
 
           <div class="card">
-            <span class="card-label">Configuration</span>
-
             <div style="margin-bottom:0.5rem; font-size:0.75rem; color:var(--text-muted);">Network</div>
             <div class="toggle-group" id="network-toggle">
               ${supportedNetworks.map((n, i) => `<button class="toggle-opt${i === 0 ? " active" : ""}" id="net-${n}" onclick="setNetwork('${n}')"><iconify-icon icon="${n === "solana" ? "token:sol" : "token:eth"}" style="vertical-align:middle; margin-right:4px;"></iconify-icon>${n.toUpperCase()}</button>`).join("\n              ")}
@@ -701,7 +693,6 @@ ${renderTeeAttestationStatusCard()}
           </div>
 
           <div class="card">
-            <span class="card-label">Privacy Options</span>
             <input type="text" class="sleek-input" id="in-passphrase" 
                    placeholder="Optional: Passphrase to encrypt proof (leave empty for public)">
              <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.25rem;">
@@ -757,10 +748,6 @@ ${renderTeeAttestationAuditCard()}
               </button>
             </a>
 
-            <button class="std-btn" style="width:100%;" onclick="downloadAttestation()">
-              <iconify-icon icon="ph:download-simple-bold" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
-              Download Attestation Quote
-            </button>
           </div>
 
           <div class="card" style="margin-top:1rem; border-color:rgba(255, 77, 0, 0.3);">
@@ -788,10 +775,7 @@ ${renderTeeAttestationAuditCard()}
           </div>
 
           <div class="card" style="border-color: var(--accent-glow);">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span class="card-label" style="color:var(--accent); margin-bottom:0;">Pricing</span>
-              <div style="font-size:2rem; font-weight:700; color:var(--text-main);">$0.01 <span style="font-size:0.9rem; color:var(--text-muted);">/ req</span></div>
-            </div>
+            <div style="font-size:2.8rem; font-weight:800; color:var(--text-main); line-height:1;">$0.01 <span style="font-size:1rem; color:var(--text-muted);">/ req</span></div>
             <div style="margin-top:0.8rem; font-size:0.8rem; color:var(--text-muted);">
               Pay via x402 (SOLANA / BASE) &bull; 90% cheaper than Chainlink and Switchboard VRF
             </div>
@@ -840,14 +824,14 @@ ${renderTeeAttestationAuditCard()}
 
           <div class="card">
             <span class="card-label">Operations</span>
-            <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.6;">
-              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Randomness</strong> - 256-bit seed</div>
-              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Number</strong> - Integer in range [min, max]</div>
-              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Dice</strong> - Roll NdM (e.g., 2d6)</div>
-              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Pick</strong> - Select one item from list</div>
-              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Shuffle</strong> - Randomize list order</div>
-              <div style="margin-bottom:0.4rem;"><strong style="color:var(--text-main);">Winners</strong> - Select N winners from list</div>
-              <div><strong style="color:var(--text-main);">UUID</strong> - Generate v4 UUID</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.75rem;">
+              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Randomness</strong><br><span style="color:var(--text-muted);">256-bit seed</span></div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Number</strong><br><span style="color:var(--text-muted);">Integer in range</span></div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Dice</strong><br><span style="color:var(--text-muted);">Roll NdM</span></div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Pick</strong><br><span style="color:var(--text-muted);">Select one item</span></div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Shuffle</strong><br><span style="color:var(--text-muted);">Randomize list</span></div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Winners</strong><br><span style="color:var(--text-muted);">Select N winners</span></div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">UUID</strong><br><span style="color:var(--text-muted);">Generate v4 UUID</span></div>
             </div>
           </div>
 

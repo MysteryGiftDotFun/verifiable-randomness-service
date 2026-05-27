@@ -17,6 +17,8 @@ function checkClass(value) {
   return "unknown";
 }
 
+let latestAttestationData = null;
+
 function updateCheckState(id, value) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -24,7 +26,71 @@ function updateCheckState(id, value) {
   setAttestationClass(el, checkClass(value));
 }
 
+function getQuoteHex(data) {
+  return data && typeof data.quote_hex === "string"
+    ? data.quote_hex.trim().replace(/^0x/i, "")
+    : "";
+}
+
+function updateQuoteSnippet(data) {
+  const quote = getQuoteHex(data);
+  const code = document.getElementById("attestation-quote-code");
+  const meta = document.getElementById("attestation-quote-meta");
+
+  if (code) {
+    code.innerText = quote || "Run live verification to load a TDX quote.";
+  }
+
+  if (meta) {
+    meta.innerText = quote
+      ? Math.floor(quote.length / 2).toLocaleString() +
+        " bytes / " +
+        quote.length.toLocaleString() +
+        " hex chars"
+      : "No quote loaded";
+  }
+}
+
+function buildDownloadPayload(data) {
+  return {
+    tee_type: data.tee_type,
+    verified: data.verified,
+    status: data.status,
+    app_id: data.app_id,
+    compose_hash: data.compose_hash,
+    instance_id: data.instance_id,
+    quote_hex: data.quote_hex,
+    event_log: data.event_log,
+    nonce: data.nonce,
+    report_data_hex: data.report_data_hex,
+    checks: data.checks,
+    verification: data.verification,
+    verification_result: data.verification_result,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
 function updateAttestationDisplay(data) {
+  if (data) latestAttestationData = data;
+  updateQuoteSnippet(data);
+
   if (typeof updateTeeIdentity === "function") {
     updateTeeIdentity(data || {});
   }
@@ -176,47 +242,44 @@ async function verify() {
   }
 }
 
+async function getAttestationWithQuote() {
+  if (getQuoteHex(latestAttestationData)) {
+    return latestAttestationData;
+  }
+  return await loadAttestationStatus();
+}
+
 async function downloadAttestation() {
   if (typeof log === "function") log("Fetching attestation...", "info");
   try {
-    const response = await fetch("/v1/attestation/status", {
-      cache: "no-store",
+    const data = await getAttestationWithQuote();
+    if (!getQuoteHex(data)) throw new Error("No attestation quote available");
+
+    const blob = new Blob([JSON.stringify(buildDownloadPayload(data), null, 2)], {
+      type: "application/json",
     });
-    const data = await response.json();
-
-    const attestationData = {
-      tee_type: data.tee_type,
-      verified: data.verified,
-      status: data.status,
-      app_id: data.app_id,
-      compose_hash: data.compose_hash,
-      instance_id: data.instance_id,
-      quote_hex: data.quote_hex,
-      event_log: data.event_log,
-      nonce: data.nonce,
-      report_data_hex: data.report_data_hex,
-      checks: data.checks,
-      verification: data.verification,
-      verification_result: data.verification_result,
-      timestamp: new Date().toISOString(),
-    };
-
-    if (data.quote_hex || data.verified) {
-      const blob = new Blob([JSON.stringify(attestationData, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "attestation.json";
-      a.click();
-      URL.revokeObjectURL(url);
-      if (typeof log === "function") log("Attestation downloaded!", "success");
-    } else {
-      throw new Error("No attestation available");
-    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "attestation.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    if (typeof log === "function") log("Attestation downloaded!", "success");
   } catch (e) {
     if (typeof log === "function") log("Download failed: " + e.message, "error");
+  }
+}
+
+async function copyAttestationQuote() {
+  if (typeof log === "function") log("Copying attestation quote...", "info");
+  try {
+    const data = await getAttestationWithQuote();
+    const quoteHex = getQuoteHex(data);
+    if (!quoteHex) throw new Error("No attestation quote available");
+    await copyText(quoteHex);
+    if (typeof log === "function") log("Attestation quote copied!", "success");
+  } catch (e) {
+    if (typeof log === "function") log("Copy failed: " + e.message, "error");
   }
 }
 
@@ -225,10 +288,12 @@ window.TeeAttestation = {
   refresh: loadAttestationStatus,
   verify,
   download: downloadAttestation,
+  copyQuote: copyAttestationQuote,
 };
 
 window.verify = verify;
 window.downloadAttestation = downloadAttestation;
+window.copyAttestationQuote = copyAttestationQuote;
 
 document.addEventListener("DOMContentLoaded", () => {
   loadAttestationStatus().catch(() => {});
