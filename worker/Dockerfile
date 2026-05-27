@@ -20,8 +20,8 @@ COPY CHANGELOG.md .
 # Build TypeScript
 RUN npm run build
 
-# Copy landing-client.js to dist/static/ for landing page (after build creates dist/)
-RUN mkdir -p dist/static && cp static/landing-client.js dist/static/ && ls -la dist/
+# Copy inlined landing scripts to dist/static/ for landing page (after build creates dist/)
+RUN mkdir -p dist/static && cp static/*.js dist/static/ && ls -la dist/
 
 # Remove dev dependencies
 RUN npm prune --production

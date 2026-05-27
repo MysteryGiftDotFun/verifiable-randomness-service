@@ -1169,81 +1169,6 @@ async function createSolanaPayment(paymentReq, body, resource) {
   };
 }
 
-// Verify (called from onclick in HTML)
-async function verify() {
-  log("Verifying attestation...", "info");
-  const verifyRes = document.getElementById("verify-res");
-
-  try {
-    const response = await fetch("/v1/attestation");
-    const data = await response.json();
-
-    // Check for valid attestation data (quote_hex or verified flag)
-    if (data.quote_hex || data.verified === true) {
-      log("Attestation verified!", "success");
-      if (verifyRes) {
-        verifyRes.style.display = "block";
-        verifyRes.innerHTML =
-          '<span style="color:var(--success)">✓ Hardware attestation is valid</span>';
-      }
-    } else if (data.tee_type === "simulation") {
-      log("Running in simulation mode", "info");
-      if (verifyRes) {
-        verifyRes.style.display = "block";
-        verifyRes.innerHTML =
-          '<span style="color:var(--text-muted)">⚠ Simulation mode - no hardware attestation</span>';
-      }
-    } else {
-      throw new Error("No attestation data available");
-    }
-  } catch (e) {
-    log("Verification failed: " + e.message, "error");
-    if (verifyRes) {
-      verifyRes.style.display = "block";
-      verifyRes.innerHTML =
-        '<span style="color:#F87171">✗ Verification failed</span>';
-    }
-  }
-}
-
-// Download attestation (called from onclick in HTML)
-async function downloadAttestation() {
-  log("Fetching attestation...", "info");
-  try {
-    const response = await fetch("/v1/attestation");
-    const data = await response.json();
-
-    const attestationData = {
-      tee_type: data.tee_type,
-      verified: data.verified,
-      app_id: data.app_id,
-      compose_hash: data.compose_hash,
-      instance_id: data.instance_id,
-      quote_hex: data.quote_hex,
-      event_log: data.event_log,
-      verification: data.verification,
-      timestamp: new Date().toISOString(),
-    };
-
-    if (data.quote_hex || data.verified) {
-      const blob = new Blob([JSON.stringify(attestationData, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "attestation.json";
-      a.click();
-      URL.revokeObjectURL(url);
-      log("Attestation downloaded!", "success");
-    } else {
-      throw new Error("No attestation available");
-    }
-  } catch (e) {
-    log("Download failed: " + e.message, "error");
-  }
-}
-
 // Download Arweave proof (called from receipt modal)
 async function downloadArweaveProof(url) {
   try {
@@ -1411,23 +1336,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 });
-
-// Auto-load TEE info (with null checks)
-(function () {
-  fetch("/v1/attestation")
-    .then((r) => r.json())
-    .then((data) => {
-      updateTeeIdentity(data);
-    })
-    .catch(() => {
-      const teeType = document.getElementById("tee-type");
-      const composeHash = document.getElementById("compose-hash");
-      const versionHash = document.getElementById("version-hash");
-      if (teeType) teeType.innerText = "Error";
-      if (composeHash) composeHash.innerText = "Failed to load";
-      if (versionHash) versionHash.innerText = "N/A";
-    });
-})();
 
 (function () {
   fetch("/v1/health")

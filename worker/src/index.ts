@@ -111,6 +111,9 @@ x402Server
 console.log("[x402] Registered official x402 EVM and SVM schemes");
 
 const SUPPORTED_NETWORKS = ["solana", "base"];
+const PHALA_ATTESTATION_VERIFY_URL =
+  process.env.PHALA_ATTESTATION_VERIFY_URL ||
+  "https://cloud-api.phala.network/api/v1/attestations/verify";
 
 // TEE deployment info
 let TEE_INFO: {
@@ -154,6 +157,154 @@ function applyDstackEventLog(eventLog?: string | null): void {
   } catch {
     // Event log parsing failed; keep the last known identity values.
   }
+}
+
+function normalizeHex(value: unknown): string {
+  return typeof value === "string"
+    ? value.trim().replace(/^0x/i, "").toLowerCase()
+    : "";
+}
+
+function getQuoteReportData(verificationResult: any): string {
+  return (
+    verificationResult?.quote?.body?.reportdata ||
+    verificationResult?.quote?.body?.report_data ||
+    verificationResult?.quote?.reportdata ||
+    verificationResult?.quote?.report_data ||
+    ""
+  );
+}
+
+function reportDataMatches(actual: unknown, expected: unknown): boolean {
+  const actualHex = normalizeHex(actual);
+  const expectedHex = normalizeHex(expected);
+  if (!actualHex || !expectedHex) return false;
+
+  return (
+    actualHex === expectedHex ||
+    actualHex.endsWith(expectedHex) ||
+    actualHex.startsWith(expectedHex)
+  );
+}
+
+function buildAttestationChallenge(nonce?: unknown): {
+  nonce: string;
+  reportData: Buffer;
+  reportDataHex: string;
+} {
+  const normalizedNonce =
+    typeof nonce === "string" && nonce.trim()
+      ? nonce.trim().slice(0, 128)
+      : crypto.randomBytes(16).toString("hex");
+  const reportData = crypto
+    .createHash("sha256")
+    .update("mystery-gift-rng-attestation-status-v1")
+    .update(normalizedNonce)
+    .digest();
+
+  return {
+    nonce: normalizedNonce,
+    reportData,
+    reportDataHex: reportData.toString("hex"),
+  };
+}
+
+async function verifyQuoteHex(quoteHex: string, expectedReportDataHex?: string) {
+  const verifyResponse = await fetch(PHALA_ATTESTATION_VERIFY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hex: quoteHex }),
+    // @ts-ignore - AbortSignal.timeout is available in Node 18+.
+    signal: (AbortSignal as any).timeout(5000),
+  });
+
+  if (!verifyResponse.ok) {
+    const errorText = await verifyResponse.text();
+    throw new Error(`Phala Cloud verification failed: ${errorText}`);
+  }
+
+  const result = await verifyResponse.json();
+  const hardwareVerified = result.quote?.verified === true;
+  const reportData = getQuoteReportData(result);
+  const freshnessVerified = expectedReportDataHex
+    ? reportDataMatches(reportData, expectedReportDataHex)
+    : null;
+
+  return {
+    result,
+    hardwareVerified,
+    reportData,
+    freshnessVerified,
+    valid: hardwareVerified && freshnessVerified !== false,
+  };
+}
+
+async function getLiveAttestationStatus(nonce?: unknown) {
+  const dstack = getDstackClient();
+  const checkedAt = new Date().toISOString();
+
+  if (!dstack) {
+    return {
+      status: "simulation",
+      verified: false,
+      valid: false,
+      checked_at: checkedAt,
+      tee_type: TEE_TYPE,
+      error: "TEE hardware not available (simulation mode)",
+      checks: {
+        confidential_hardware: "unavailable",
+        verified_software: "unavailable",
+        fresh_quote: "unavailable",
+      },
+    };
+  }
+
+  const challenge = buildAttestationChallenge(nonce);
+  const quote = await dstack.getQuote(challenge.reportData);
+
+  if (!quote || !quote.quote) {
+    throw new Error("Failed to generate attestation");
+  }
+
+  applyDstackEventLog(quote.event_log);
+  const verification = await verifyQuoteHex(quote.quote, challenge.reportDataHex);
+  const verifiedSoftware = Boolean(TEE_INFO.compose_hash && TEE_INFO.app_id);
+  const allVerified = verification.valid && verifiedSoftware;
+
+  return {
+    status: allVerified ? "verified" : "partial",
+    verified: allVerified,
+    valid: allVerified,
+    checked_at: checkedAt,
+    verified_by: "Phala Cloud Attestation API",
+    tee_type: TEE_TYPE,
+    app_id: TEE_INFO.app_id,
+    compose_hash: TEE_INFO.compose_hash,
+    instance_id: TEE_INFO.instance_id,
+    quote_hex: quote.quote,
+    event_log: quote.event_log,
+    nonce: challenge.nonce,
+    report_data_hex: challenge.reportDataHex,
+    quote_report_data: verification.reportData,
+    checks: {
+      confidential_hardware: verification.hardwareVerified
+        ? "verified"
+        : "failed",
+      verified_software: verifiedSoftware ? "verified" : "unknown",
+      fresh_quote: verification.freshnessVerified ? "verified" : "failed",
+    },
+    verification_result: verification.result,
+    verification: {
+      phala_cloud_api: PHALA_ATTESTATION_VERIFY_URL,
+      phala_dashboard: `https://cloud.phala.network/dashboard/cvms/${TEE_INFO.app_id}`,
+      trust_center: "https://trust.phala.com/",
+      attestation_explorer: "https://proof.t16z.com/",
+    },
+    source_code: {
+      repository: "https://github.com/mysterygift/mystery-gift",
+      path: "services/verifiable-randomness-service/worker",
+    },
+  };
 }
 
 // Arweave immutable proof configuration
@@ -1211,11 +1362,8 @@ app.get("/v1/attestation", async (_req: Request, res: Response) => {
     }
 
     // Get fresh attestation quote for verification
-    const reportData = crypto
-      .createHash("sha256")
-      .update("attestation-request")
-      .digest();
-    const quote = await dstack.getQuote(reportData);
+    const challenge = buildAttestationChallenge(_req.query?.nonce);
+    const quote = await dstack.getQuote(challenge.reportData);
 
     if (!quote || !quote.quote) {
       res.status(500).json({ error: "Failed to generate attestation" });
@@ -1232,16 +1380,17 @@ app.get("/v1/attestation", async (_req: Request, res: Response) => {
       instance_id: TEE_INFO.instance_id,
       quote_hex: quote.quote,
       event_log: quote.event_log,
+      nonce: challenge.nonce,
+      report_data_hex: challenge.reportDataHex,
       verification: {
-        phala_cloud_api:
-          "https://cloud-api.phala.network/api/v1/attestations/verify",
+        phala_cloud_api: PHALA_ATTESTATION_VERIFY_URL,
         phala_dashboard: `https://cloud.phala.network/dashboard/cvms/${TEE_INFO.app_id}`,
         instructions:
-          "POST the quote_hex to the verification API to verify this attestation",
+          "POST the quote_hex and report_data_hex to /v1/verify or use /v1/attestation/status for a verified display payload",
       },
       source_code: {
         repository: "https://github.com/mysterygift/mystery-gift",
-        path: "tee-worker/",
+        path: "services/verifiable-randomness-service/worker",
       },
     });
   } catch (error) {
@@ -1251,12 +1400,42 @@ app.get("/v1/attestation", async (_req: Request, res: Response) => {
 });
 
 /**
+ * GET /v1/attestation/status - Fresh quote plus server-side verification
+ * Used by the landing page for the always-visible TEE verification badge.
+ */
+app.get("/v1/attestation/status", async (req: Request, res: Response) => {
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    const status = await getLiveAttestationStatus(req.query?.nonce);
+    res.json(status);
+  } catch (error) {
+    console.error("[TEE] Attestation status error:", error);
+    res.status(500).json({
+      status: "failed",
+      verified: false,
+      valid: false,
+      checked_at: new Date().toISOString(),
+      tee_type: TEE_TYPE,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to verify attestation status",
+      checks: {
+        confidential_hardware: "failed",
+        verified_software: "unknown",
+        fresh_quote: "failed",
+      },
+    });
+  }
+});
+
+/**
  * POST /v1/verify - Verify an attestation quote
  * Uses Phala Cloud's centralized verification API
  */
 app.post("/v1/verify", async (req: Request, res: Response) => {
   try {
-    const { attestation, quote_hex } = req.body;
+    const { attestation, quote_hex, expected_report_data_hex } = req.body;
 
     let quoteToVerify: string | undefined;
 
@@ -1290,39 +1469,29 @@ app.post("/v1/verify", async (req: Request, res: Response) => {
       return;
     }
 
-    // Call Phala Cloud's verification API
-    const verifyResponse = await fetch(
-      "https://cloud-api.phala.network/api/v1/attestations/verify",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hex: quoteToVerify }),
-        // Break request if it takes too long (5s timeout)
-        // @ts-ignore - AbortSignal.timeout is available in Node 18+ but might not be in types
-        signal: (AbortSignal as any).timeout(5000),
-      },
+    const verification = await verifyQuoteHex(
+      quoteToVerify,
+      expected_report_data_hex,
     );
 
-    if (!verifyResponse.ok) {
-      const errorText = await verifyResponse.text();
-      res.status(verifyResponse.status).json({
-        valid: false,
-        error: `Phala Cloud verification failed: ${errorText}`,
-      });
-      return;
-    }
-
-    const result = await verifyResponse.json();
-
     res.json({
-      valid: result.quote?.verified === true,
-      verification_result: result,
+      valid: verification.valid,
+      hardware_verified: verification.hardwareVerified,
+      fresh_quote:
+        expected_report_data_hex === undefined
+          ? null
+          : verification.freshnessVerified === true,
+      quote_report_data: verification.reportData,
+      verification_result: verification.result,
       verified_by: "Phala Cloud Attestation API",
       verified_at: new Date().toISOString(),
     });
   } catch (error) {
     console.error("[TEE] Verification error:", error);
-    res.status(500).json({ error: "Verification failed" });
+    res.status(500).json({
+      valid: false,
+      error: error instanceof Error ? error.message : "Verification failed",
+    });
   }
 });
 

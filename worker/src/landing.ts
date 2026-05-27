@@ -8,17 +8,23 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import {
+  renderTeeAttestationAuditCard,
+  renderTeeAttestationPill,
+  renderTeeAttestationStatusCard,
+  renderTeeAttestationStyles,
+} from "./attestation-ui.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function findLandingClientJS(): string {
+function findStaticFile(fileName: string): string {
   const possiblePaths = [
-    path.join(__dirname, "static", "landing-client.js"),
-    path.join(__dirname, "..", "static", "landing-client.js"),
-    path.join(process.cwd(), "static", "landing-client.js"),
-    path.join(process.cwd(), "dist", "static", "landing-client.js"),
-    path.join(process.cwd(), "dist", "landing-client.js"),
+    path.join(__dirname, "static", fileName),
+    path.join(__dirname, "..", "static", fileName),
+    path.join(process.cwd(), "static", fileName),
+    path.join(process.cwd(), "dist", "static", fileName),
+    path.join(process.cwd(), "dist", fileName),
   ];
 
   for (const p of possiblePaths) {
@@ -31,11 +37,12 @@ function findLandingClientJS(): string {
     }
   }
   throw new Error(
-    `landing-client.js not found. Searched: ${possiblePaths.join(", ")}`,
+    `${fileName} not found. Searched: ${possiblePaths.join(", ")}`,
   );
 }
 
-const LANDING_CLIENT_JS = findLandingClientJS();
+const ATTESTATION_CLIENT_JS = findStaticFile("attestation-client.js");
+const LANDING_CLIENT_JS = findStaticFile("landing-client.js");
 
 export interface LandingConfig {
   version: string;
@@ -580,12 +587,14 @@ export function renderLandingPage(config: LandingConfig): string {
     .toast { position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%) translateY(100px); background: #ffffff; color: #000; padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 0.85rem; font-weight: 600; z-index: 2000; opacity: 0; transition: all 0.3s ease; }
     .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
     .verification-badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.8rem; background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 6px; font-size: 0.75rem; color: #ffffff; font-weight: 500; }
+${renderTeeAttestationStyles()}
   </style>
 </head>
 <body>
   <div class="layout">
     <!-- Hero -->
     <div class="hero" id="hero-section">
+${renderTeeAttestationPill()}
 
       <div class="wallet-container-hero">
         <button class="wallet-btn" id="connect-btn" onclick="toggleWallet()">
@@ -626,6 +635,8 @@ export function renderLandingPage(config: LandingConfig): string {
 
         <!-- RUN -->
         <div id="v-run" class="tab-view active">
+${renderTeeAttestationStatusCard()}
+
           <div class="card">
             <span class="card-label">Operation Type</span>
             <div class="custom-dropdown" id="op-dropdown">
@@ -701,6 +712,8 @@ export function renderLandingPage(config: LandingConfig): string {
 
         <!-- VERIFY -->
         <div id="v-verify" class="tab-view">
+${renderTeeAttestationAuditCard()}
+
           <div class="card">
             <span class="card-label">What Can You Verify?</span>
             <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.6; margin-bottom:0;">
@@ -920,6 +933,9 @@ export function renderLandingPage(config: LandingConfig): string {
   </script>
   
   <!-- Inlined landing-client.js to avoid Cloudflare Access blocking -->
+  <script>
+${ATTESTATION_CLIENT_JS}
+  </script>
   <script>
 ${LANDING_CLIENT_JS}
   </script>
