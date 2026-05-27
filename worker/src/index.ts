@@ -1340,6 +1340,7 @@ app.get("/", (_req: Request, res: Response) => {
     environment: process.env.APP_ENVIRONMENT || "development",
   });
 
+  res.setHeader("Cache-Control", "no-store");
   res.type("html").send(html);
 });
 
@@ -2063,6 +2064,7 @@ async function start() {
     if (filePath) {
       console.log(`[TEE] Serving landing-client.js from: ${filePath}`);
       res.setHeader("Content-Type", "application/javascript");
+      res.setHeader("Cache-Control", "no-store");
       res.send(fs.readFileSync(filePath, "utf-8"));
     } else {
       console.error(
