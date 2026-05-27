@@ -65,7 +65,11 @@ export function renderTeeAttestationStatusCard(): string {
           </div>`;
 }
 
-export function renderTeeAttestationAuditCard(): string {
+export function renderTeeAttestationAuditCard(appId?: string): string {
+  const trustCenterUrl = appId
+    ? `https://trust.phala.com/app/${encodeURIComponent(appId)}`
+    : "https://trust.phala.com/";
+
   return `
           <div class="card tee-status-card">
             <span class="card-label" style="color:var(--accent);">Live Verification</span>
@@ -78,6 +82,10 @@ export function renderTeeAttestationAuditCard(): string {
                 <iconify-icon icon="ph:seal-check-fill" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
                 Verify Again
               </button>
+              <a class="std-btn" href="${trustCenterUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; display:flex; align-items:center; justify-content:center; gap:4px;">
+                <iconify-icon icon="ph:shield-check-fill" style="vertical-align:text-bottom;"></iconify-icon>
+                Trust Center Report
+              </a>
             </div>
             <div class="tee-quote-actions">
               <button class="std-btn" onclick="window.TeeAttestation.download()">

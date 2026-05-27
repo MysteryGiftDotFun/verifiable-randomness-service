@@ -702,19 +702,7 @@ ${renderTeeAttestationStyles()}
 
         <!-- VERIFY -->
         <div id="v-verify" class="tab-view">
-${renderTeeAttestationAuditCard()}
-
-          <div class="card">
-            <span class="card-label">What Can You Verify?</span>
-            <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.6; margin-bottom:0;">
-              This service runs inside an <strong style="color:var(--text-main);">Intel TDX enclave</strong> — a hardware-isolated environment that even we cannot tamper with. You can independently verify:
-            </p>
-            <ul style="font-size:0.8rem; color:var(--text-muted); margin:0.5rem 0 0 1rem; padding:0;">
-              <li>The hardware attestation quote is signed by Intel</li>
-              <li>The compose hash matches our open source code</li>
-              <li>The enclave is running untampered code</li>
-            </ul>
-          </div>
+${renderTeeAttestationAuditCard(appId)}
 
           <div class="card">
             <span class="card-label">System Identity</span>
@@ -740,10 +728,10 @@ ${renderTeeAttestationAuditCard()}
               </button>
             </a>
 
-            <a href="https://trust.phala.com/" target="_blank" style="text-decoration:none; display:block; margin-bottom:0.5rem;">
+            <a href="https://trust.phala.com/app/${encodeURIComponent(appId)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; display:block; margin-bottom:0.5rem;">
               <button class="std-btn" style="width:100%;">
                 <iconify-icon icon="ph:shield-check-fill" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
-                Phala Trust Center
+                Phala Trust Center Report
               </button>
             </a>
 
