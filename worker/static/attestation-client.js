@@ -99,27 +99,16 @@ function updateAttestationDisplay(data) {
   const failed =
     data &&
     (data.status === "failed" || data.error || data.verified === false);
-  const pill = document.getElementById("attestation-pill");
-  const pillText = document.getElementById("attestation-pill-text");
   const summaryTitle = document.getElementById("attestation-summary-title");
   const summaryDetail = document.getElementById("attestation-summary-detail");
   const summaryBadge = document.getElementById("attestation-summary-badge");
   const lastChecked = document.getElementById("attestation-last-checked");
   const verifyRes = document.getElementById("verify-res");
 
-  setAttestationClass(pill, verified ? "verified" : failed ? "failed" : "");
   setAttestationClass(
     summaryBadge,
     verified ? "verified" : failed ? "failed" : "",
   );
-
-  if (pillText) {
-    pillText.innerText = verified
-      ? "TEE VERIFIED"
-      : failed
-        ? "TEE UNVERIFIED"
-        : "VERIFYING TEE";
-  }
 
   if (summaryBadge) {
     summaryBadge.innerText = verified

@@ -677,8 +677,7 @@ ${renderTeeAttestationStyles()}
 
           <div class="card" style="border-color: var(--accent-glow);">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span class="card-label" style="color:var(--accent); margin-bottom:0;">Pricing</span>
-              <div style="font-size:1.5rem; font-weight:700; color:var(--text-main);">$0.01 <span style="font-size:0.75rem; color:var(--text-muted);">/ req</span></div>
+              <div style="font-size:2.15rem; font-weight:800; color:var(--text-main); line-height:1;">$0.01 <span style="font-size:0.85rem; color:var(--text-muted);">/ req</span></div>
             </div>
             <div style="margin-top:0.5rem; font-size:0.7rem; color:var(--text-muted);">
               Pay via x402 (SOLANA / BASE)
@@ -775,7 +774,7 @@ ${renderTeeAttestationAuditCard()}
           </div>
 
           <div class="card" style="border-color: var(--accent-glow);">
-            <div style="font-size:2.8rem; font-weight:800; color:var(--text-main); line-height:1;">$0.01 <span style="font-size:1rem; color:var(--text-muted);">/ req</span></div>
+            <div style="font-size:3.4rem; font-weight:800; color:var(--text-main); line-height:1;">$0.01 <span style="font-size:1.05rem; color:var(--text-muted);">/ req</span></div>
             <div style="margin-top:0.8rem; font-size:0.8rem; color:var(--text-muted);">
               Pay via x402 (SOLANA / BASE) &bull; 90% cheaper than Chainlink and Switchboard VRF
             </div>
