@@ -87,6 +87,60 @@ const PAYMENT_WALLET = (() => {
 })();
 
 const PAYMENT_WALLET_BASE = process.env.PAYMENT_WALLET_BASE || PAYMENT_WALLET;
+const PAYMENT_WALLET_ROBINHOOD =
+  process.env.PAYMENT_WALLET_ROBINHOOD || PAYMENT_WALLET_BASE;
+
+// Robinhood Chain (eip155:4663 mainnet / 46630 testnet).
+// USDG settlement requires a RH-capable facilitator (e.g. Solvador).
+// Fail closed: only advertise RH rails when X402_FACILITATOR_URL_ROBINHOOD is set
+// or X402_ROBINHOOD_ENABLED=true.
+const ROBINHOOD_FACILITATOR_URL = (
+  process.env.X402_FACILITATOR_URL_ROBINHOOD ||
+  (process.env.X402_ROBINHOOD_ENABLED === "true"
+    ? "https://api.solvador.com"
+    : "")
+).trim();
+const ROBINHOOD_PAYMENTS_ENABLED = Boolean(ROBINHOOD_FACILITATOR_URL);
+const USDG_ROBINHOOD = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168";
+const CAIP_SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+const CAIP_SOLANA_DEVNET = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
+const CAIP_BASE_MAINNET = "eip155:8453";
+const CAIP_BASE_SEPOLIA = "eip155:84532";
+const CAIP_ROBINHOOD_MAINNET = "eip155:4663";
+const CAIP_ROBINHOOD_TESTNET = "eip155:46630";
+
+function buildX402Accepts(price: string = "$0.01") {
+  const accepts: Array<{
+    scheme: "exact";
+    price: string;
+    network: string;
+    payTo: string;
+    asset?: string;
+  }> = [
+    {
+      scheme: "exact",
+      price,
+      network: CAIP_SOLANA_MAINNET,
+      payTo: PAYMENT_WALLET,
+    },
+    {
+      scheme: "exact",
+      price,
+      network: CAIP_BASE_MAINNET,
+      payTo: PAYMENT_WALLET_BASE,
+    },
+  ];
+  if (ROBINHOOD_PAYMENTS_ENABLED) {
+    accepts.push({
+      scheme: "exact",
+      price,
+      network: CAIP_ROBINHOOD_MAINNET,
+      payTo: PAYMENT_WALLET_ROBINHOOD,
+      asset: USDG_ROBINHOOD,
+    });
+  }
+  return accepts;
+}
 
 // Load version from package.json
 const packageJson = JSON.parse(
@@ -103,14 +157,27 @@ const x402Server = new x402ResourceServer(facilitatorClient);
 // Register official x402 schemes (merchant-side)
 // These work with PayAI's hosted facilitator which provides feePayer addresses
 x402Server
-  .register("eip155:8453", new ExactEvmScheme()) // Base mainnet
-  .register("eip155:84532", new ExactEvmScheme()) // Base Sepolia
-  .register("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", new ExactSvmScheme()) // Solana mainnet
-  .register("solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", new ExactSvmScheme()); // Solana devnet
+  .register(CAIP_BASE_MAINNET, new ExactEvmScheme()) // Base mainnet
+  .register(CAIP_BASE_SEPOLIA, new ExactEvmScheme()) // Base Sepolia
+  .register(CAIP_ROBINHOOD_MAINNET, new ExactEvmScheme()) // Robinhood Chain mainnet
+  .register(CAIP_ROBINHOOD_TESTNET, new ExactEvmScheme()) // Robinhood Chain testnet
+  .register(CAIP_SOLANA_MAINNET, new ExactSvmScheme()) // Solana mainnet
+  .register(CAIP_SOLANA_DEVNET, new ExactSvmScheme()); // Solana devnet
 
 console.log("[x402] Registered official x402 EVM and SVM schemes");
+if (ROBINHOOD_PAYMENTS_ENABLED) {
+  console.log(
+    `[x402] Robinhood Chain payments enabled via ${ROBINHOOD_FACILITATOR_URL}`,
+  );
+} else {
+  console.log(
+    "[x402] Robinhood Chain payments disabled (set X402_FACILITATOR_URL_ROBINHOOD or X402_ROBINHOOD_ENABLED=true)",
+  );
+}
 
-const SUPPORTED_NETWORKS = ["solana", "base"];
+const SUPPORTED_NETWORKS = ROBINHOOD_PAYMENTS_ENABLED
+  ? ["solana", "base", "robinhood"]
+  : ["solana", "base"];
 const PHALA_ATTESTATION_VERIFY_URL =
   process.env.PHALA_ATTESTATION_VERIFY_URL ||
   "https://cloud-api.phala.network/api/v1/attestations/verify";
@@ -605,132 +672,43 @@ app.use("/v1/", globalLimiter);
 
 // x402 Payment Middleware using official @x402/express
 // This handles 402 responses, payment verification, and settlement automatically
+const x402RouteAccepts = buildX402Accepts("$0.01");
+
 app.use(
   paymentMiddleware(
     {
       "POST /v1/randomness": {
-        accepts: [
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-            payTo: PAYMENT_WALLET,
-          },
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "eip155:8453",
-            payTo: PAYMENT_WALLET_BASE,
-          },
-        ],
+        accepts: x402RouteAccepts,
         description: "TEE Randomness Request",
         mimeType: "application/json",
       },
       "POST /v1/random/number": {
-        accepts: [
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-            payTo: PAYMENT_WALLET,
-          },
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "eip155:8453",
-            payTo: PAYMENT_WALLET_BASE,
-          },
-        ],
+        accepts: x402RouteAccepts,
         description: "Random Number Generation",
         mimeType: "application/json",
       },
       "POST /v1/random/pick": {
-        accepts: [
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-            payTo: PAYMENT_WALLET,
-          },
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "eip155:8453",
-            payTo: PAYMENT_WALLET_BASE,
-          },
-        ],
+        accepts: x402RouteAccepts,
         description: "Random Pick from List",
         mimeType: "application/json",
       },
       "POST /v1/random/shuffle": {
-        accepts: [
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-            payTo: PAYMENT_WALLET,
-          },
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "eip155:8453",
-            payTo: PAYMENT_WALLET_BASE,
-          },
-        ],
+        accepts: x402RouteAccepts,
         description: "Random List Shuffle",
         mimeType: "application/json",
       },
       "POST /v1/random/winners": {
-        accepts: [
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-            payTo: PAYMENT_WALLET,
-          },
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "eip155:8453",
-            payTo: PAYMENT_WALLET_BASE,
-          },
-        ],
+        accepts: x402RouteAccepts,
         description: "Random Winner Selection",
         mimeType: "application/json",
       },
       "POST /v1/random/uuid": {
-        accepts: [
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-            payTo: PAYMENT_WALLET,
-          },
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "eip155:8453",
-            payTo: PAYMENT_WALLET_BASE,
-          },
-        ],
+        accepts: x402RouteAccepts,
         description: "UUIDv4 Generation",
         mimeType: "application/json",
       },
       "POST /v1/random/dice": {
-        accepts: [
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-            payTo: PAYMENT_WALLET,
-          },
-          {
-            scheme: "exact",
-            price: "$0.01",
-            network: "eip155:8453",
-            payTo: PAYMENT_WALLET_BASE,
-          },
-        ],
+        accepts: x402RouteAccepts,
         description: "Dice Roll",
         mimeType: "application/json",
       },
@@ -1329,8 +1307,12 @@ app.get("/", (_req: Request, res: Response) => {
     teeType: TEE_TYPE,
     paymentWallet: PAYMENT_WALLET,
     paymentWalletBase: PAYMENT_WALLET_BASE,
+    paymentWalletRobinhood: PAYMENT_WALLET_ROBINHOOD,
     heliusRpcUrl,
     baseRpcUrl,
+    robinhoodRpcUrl:
+      process.env.ROBINHOOD_RPC_URL ||
+      "https://rpc.mainnet.chain.robinhood.com",
     facilitatorUrl: "https://facilitator.payai.network",
     supportedNetworks: SUPPORTED_NETWORKS,
     arweaveEnabled: ARWEAVE_ENABLED,
@@ -1761,7 +1743,7 @@ app.get("/terms", (_req: Request, res: Response) => {
     <p>The Service operates on a pay-per-request model using the x402 protocol:</p>
     <ul>
       <li>Standard rate: $0.01 USD per request</li>
-      <li>Payments accepted in USDC on Base or Solana</li>
+      <li>Payments accepted in USDC on Solana/Base, and USDG on Robinhood Chain when enabled</li>
       <li>All payments are final and non-refundable</li>
       <li>All requests require $0.01 USDC payment via x402 protocol</li>
     </ul>

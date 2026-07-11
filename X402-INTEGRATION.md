@@ -77,6 +77,8 @@ const x402Server = new x402ResourceServer(facilitatorClient);
 x402Server
   .register("eip155:8453", new ExactEvmScheme()) // Base mainnet
   .register("eip155:84532", new ExactEvmScheme()) // Base Sepolia
+  .register("eip155:4663", new ExactEvmScheme()) // Robinhood Chain mainnet
+  .register("eip155:46630", new ExactEvmScheme()) // Robinhood Chain testnet
   .register("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", new ExactSvmScheme()) // Solana mainnet
   .register("solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", new ExactSvmScheme()); // Solana devnet
 
@@ -114,6 +116,8 @@ app.use(
 | -------------- | ----------------------------------------- |
 | Base Mainnet   | `eip155:8453`                             |
 | Base Sepolia   | `eip155:84532`                            |
+| Robinhood Chain | `eip155:4663` (USDG; requires `X402_FACILITATOR_URL_ROBINHOOD`) |
+| Robinhood Testnet | `eip155:46630`                         |
 | Solana Mainnet | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` |
 | Solana Devnet  | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` |
 

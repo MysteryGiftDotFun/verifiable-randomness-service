@@ -47,8 +47,10 @@ export interface LandingConfig {
   teeType: string;
   paymentWallet: string;
   paymentWalletBase?: string;
+  paymentWalletRobinhood?: string;
   heliusRpcUrl?: string;
   baseRpcUrl?: string;
+  robinhoodRpcUrl?: string;
   facilitatorUrl: string;
   supportedNetworks: string[];
   arweaveEnabled: boolean;
@@ -66,8 +68,10 @@ export function renderLandingPage(config: LandingConfig): string {
     nodeUrl,
     paymentWallet,
     paymentWalletBase,
+    paymentWalletRobinhood,
     heliusRpcUrl,
     baseRpcUrl,
+    robinhoodRpcUrl,
     facilitatorUrl,
     supportedNetworks,
     arweaveEnabled,
@@ -80,12 +84,24 @@ export function renderLandingPage(config: LandingConfig): string {
   const networksJson = JSON.stringify(supportedNetworks);
 
   const hasBase = supportedNetworks.includes("base");
+  const hasRobinhood = supportedNetworks.includes("robinhood");
   const solanaWallet = paymentWallet;
   const baseWallet = paymentWalletBase || paymentWallet;
+  const robinhoodWallet = paymentWalletRobinhood || baseWallet;
   const heliusRpc = heliusRpcUrl || "";
   const baseRpc = baseRpcUrl || "";
+  const robinhoodRpc =
+    robinhoodRpcUrl || "https://rpc.mainnet.chain.robinhood.com";
   const identityFingerprint =
     composeHash && composeHash !== "Loading..." ? composeHash : appId;
+  const payNetworksLabel = supportedNetworks
+    .map((n) => n.toUpperCase())
+    .join(" / ");
+  const networkIcon = (n: string) => {
+    if (n === "solana") return "token:sol";
+    if (n === "robinhood") return "simple-icons:robinhood";
+    return "token:eth";
+  };
 
   return `
 <!DOCTYPE html>
@@ -680,14 +696,14 @@ ${renderTeeAttestationStyles()}
               <div style="font-size:2.15rem; font-weight:800; color:var(--text-main); line-height:1;">$0.01 <span style="font-size:0.85rem; color:var(--text-muted);">/ req</span></div>
             </div>
             <div style="margin-top:0.5rem; font-size:0.7rem; color:var(--text-muted);">
-              Pay via x402 (SOLANA / BASE)
+              Pay via x402 (${payNetworksLabel})
             </div>
           </div>
 
           <div class="card">
             <div style="margin-bottom:0.5rem; font-size:0.75rem; color:var(--text-muted);">Network</div>
             <div class="toggle-group" id="network-toggle">
-              ${supportedNetworks.map((n, i) => `<button class="toggle-opt${i === 0 ? " active" : ""}" id="net-${n}" onclick="setNetwork('${n}')"><iconify-icon icon="${n === "solana" ? "token:sol" : "token:eth"}" style="vertical-align:middle; margin-right:4px;"></iconify-icon>${n.toUpperCase()}</button>`).join("\n              ")}
+              ${supportedNetworks.map((n, i) => `<button class="toggle-opt${i === 0 ? " active" : ""}" id="net-${n}" onclick="setNetwork('${n}')"><iconify-icon icon="${networkIcon(n)}" style="vertical-align:middle; margin-right:4px;"></iconify-icon>${n.toUpperCase()}</button>`).join("\n              ")}
             </div>
           </div>
 
@@ -764,7 +780,7 @@ ${renderTeeAttestationAuditCard(appId)}
           <div class="card" style="border-color: var(--accent-glow);">
             <div style="font-size:3.4rem; font-weight:800; color:var(--text-main); line-height:1;">$0.01 <span style="font-size:1.05rem; color:var(--text-muted);">/ req</span></div>
             <div style="margin-top:0.8rem; font-size:0.8rem; color:var(--text-muted);">
-              Pay via x402 (SOLANA / BASE) &bull; 90% cheaper than Chainlink and Switchboard VRF
+              Pay via x402 (${payNetworksLabel}) &bull; 90% cheaper than Chainlink and Switchboard VRF
             </div>
           </div>
 
@@ -896,11 +912,21 @@ ${renderTeeAttestationAuditCard(appId)}
     // Config - MUST be defined first
     var PAYMENT_WALLET = '${paymentWallet}';
     var PAYMENT_WALLET_BASE = '${baseWallet}';
+    var PAYMENT_WALLET_ROBINHOOD = '${robinhoodWallet}';
     var HELIUS_RPC_URL = '${heliusRpc}';
     var BASE_RPC_URL = '${baseRpc}';
+    var ROBINHOOD_RPC_URL = '${robinhoodRpc}';
     var FACILITATOR_URL = '${facilitatorUrl}';
     var SUPPORTED_NETWORKS = ${networksJson};
     var HAS_BASE = ${hasBase ? "true" : "false"};
+    var HAS_ROBINHOOD = ${hasRobinhood ? "true" : "false"};
+    var USDG_ROBINHOOD = '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168';
+    // Reown / WalletConnect CAIP-2 ids (for AppKit + x402 clients)
+    var CAIP_NETWORKS = {
+      solana: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      base: 'eip155:8453',
+      robinhood: 'eip155:4663'
+    };
   </script>
   
   <!-- Inlined landing-client.js to avoid Cloudflare Access blocking -->
