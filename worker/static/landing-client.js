@@ -498,14 +498,45 @@ let evmProvider = null;
 const discoveredEvmProviders = [];
 let consoleExpanded = false;
 
-const BASE_CHAIN_ID_HEX = "0x2105";
+const BASE_CHAIN_ID_HEX = "0x2105"; // 8453
 const BASE_CHAIN_PARAMS = {
   chainId: BASE_CHAIN_ID_HEX,
   chainName: "Base",
   nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-  rpcUrls: ["https://mainnet.base.org"],
+  rpcUrls: [typeof BASE_RPC_URL !== "undefined" && BASE_RPC_URL ? BASE_RPC_URL : "https://mainnet.base.org"],
   blockExplorerUrls: ["https://basescan.org"],
 };
+
+// Robinhood Chain mainnet — eip155:4663 (Reown / WalletConnect)
+const ROBINHOOD_CHAIN_ID_HEX = "0x1237"; // 4663
+const ROBINHOOD_CHAIN_PARAMS = {
+  chainId: ROBINHOOD_CHAIN_ID_HEX,
+  chainName: "Robinhood Chain",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: [
+    typeof ROBINHOOD_RPC_URL !== "undefined" && ROBINHOOD_RPC_URL
+      ? ROBINHOOD_RPC_URL
+      : "https://rpc.mainnet.chain.robinhood.com",
+  ],
+  blockExplorerUrls: ["https://robinhoodchain.blockscout.com"],
+};
+
+const EVM_NETWORKS = {
+  base: {
+    chainIdHex: BASE_CHAIN_ID_HEX,
+    params: BASE_CHAIN_PARAMS,
+    caipPrefix: "eip155:8453",
+  },
+  robinhood: {
+    chainIdHex: ROBINHOOD_CHAIN_ID_HEX,
+    params: ROBINHOOD_CHAIN_PARAMS,
+    caipPrefix: "eip155:4663",
+  },
+};
+
+function isEvmPaymentNetwork(network) {
+  return network === "base" || network === "robinhood";
+}
 
 function rememberEvmProvider(provider, info = {}) {
   if (!provider || typeof provider.request !== "function") return;
@@ -582,8 +613,9 @@ function walletErrorMessage(error) {
   return code ? message + " (" + code + ")" : message;
 }
 
-async function ensureBaseNetwork(provider) {
-  if (!provider || selectedNetwork !== "base") return;
+async function ensureEvmNetwork(provider, networkKey) {
+  const config = EVM_NETWORKS[networkKey];
+  if (!provider || !config) return;
 
   let chainId = null;
   try {
@@ -592,18 +624,18 @@ async function ensureBaseNetwork(provider) {
     return;
   }
 
-  if (String(chainId).toLowerCase() === BASE_CHAIN_ID_HEX) return;
+  if (String(chainId).toLowerCase() === config.chainIdHex.toLowerCase()) return;
 
   try {
     await provider.request({
       method: "wallet_switchEthereumChain",
-      params: [{ chainId: BASE_CHAIN_ID_HEX }],
+      params: [{ chainId: config.chainIdHex }],
     });
   } catch (switchError) {
     if (switchError && switchError.code === 4902) {
       await provider.request({
         method: "wallet_addEthereumChain",
-        params: [BASE_CHAIN_PARAMS],
+        params: [config.params],
       });
       return;
     }
@@ -611,12 +643,18 @@ async function ensureBaseNetwork(provider) {
   }
 }
 
+/** @deprecated use ensureEvmNetwork(provider, 'base') */
+async function ensureBaseNetwork(provider) {
+  return ensureEvmNetwork(provider, "base");
+}
+
 function setConnectedWallet(address) {
   wallet = address;
   const connectBtn = document.getElementById("connect-btn");
   if (connectBtn) {
-    const prefix = selectedNetwork === "base" ? 6 : 4;
-    const separator = selectedNetwork === "base" ? "..." : "..";
+    const isEvm = isEvmPaymentNetwork(selectedNetwork);
+    const prefix = isEvm ? 6 : 4;
+    const separator = isEvm ? "..." : "..";
     connectBtn.innerText =
       wallet.slice(0, prefix) + separator + wallet.slice(-4);
     connectBtn.classList.add("connected");
@@ -629,9 +667,13 @@ function setConnectedWallet(address) {
 async function connectEvmWallet() {
   const provider = getEthereumProvider();
   if (!provider) {
-    log("No Ethereum wallet found. Install MetaMask.", "error");
+    log("No Ethereum wallet found. Install MetaMask or Robinhood Wallet.", "error");
     return;
   }
+
+  const networkKey = isEvmPaymentNetwork(selectedNetwork)
+    ? selectedNetwork
+    : "base";
 
   try {
     const accounts = await provider.request({ method: "eth_requestAccounts" });
@@ -647,10 +689,12 @@ async function connectEvmWallet() {
     );
 
     try {
-      await ensureBaseNetwork(provider);
+      await ensureEvmNetwork(provider, networkKey);
     } catch (switchError) {
       log(
-        "Wallet connected, but Base network switch failed: " +
+        "Wallet connected, but " +
+          networkKey +
+          " network switch failed: " +
           walletErrorMessage(switchError),
         "error",
       );
@@ -858,7 +902,7 @@ async function initNetwork() {
     } catch (e) {
       log("Connection failed: " + e.message, "error");
     }
-  } else if (selectedNetwork === "base") {
+  } else if (isEvmPaymentNetwork(selectedNetwork)) {
     await connectEvmWallet();
   } else {
     log("Unsupported network: " + selectedNetwork, "error");
@@ -951,7 +995,7 @@ async function toggleWallet() {
       } catch (e) {
         log("Wallet connection failed: " + e.message, "error");
       }
-    } else if (selectedNetwork === "base") {
+    } else if (isEvmPaymentNetwork(selectedNetwork)) {
       await connectEvmWallet();
     }
   }
@@ -1067,15 +1111,30 @@ async function generate() {
         };
 
         // Find matching payment method based on selected network
-        const accept = paymentRequirements.accepts.find(
-          (a) =>
-            (selectedNetwork === "solana" && a.network.startsWith("solana:")) ||
-            (selectedNetwork === "base" && a.network.startsWith("eip155:")),
-        );
+        const accept = paymentRequirements.accepts.find((a) => {
+          if (selectedNetwork === "solana") {
+            return a.network.startsWith("solana:");
+          }
+          if (selectedNetwork === "base") {
+            return (
+              a.network === "eip155:8453" || a.network === "eip155:84532"
+            );
+          }
+          if (selectedNetwork === "robinhood") {
+            return (
+              a.network === "eip155:4663" || a.network === "eip155:46630"
+            );
+          }
+          return false;
+        });
 
         if (!accept) {
           throw new Error(
-            "No compatible payment method found for " + selectedNetwork,
+            "No compatible payment method found for " +
+              selectedNetwork +
+              (selectedNetwork === "robinhood"
+                ? " (Robinhood rails require X402_FACILITATOR_URL_ROBINHOOD)"
+                : ""),
           );
         }
 
@@ -1083,11 +1142,11 @@ async function generate() {
         if (selectedNetwork === "solana") {
           // Use spl-token for Solana
           payment = await createSolanaPayment(accept, body, paymentResource);
-        } else if (selectedNetwork === "base") {
+        } else if (isEvmPaymentNetwork(selectedNetwork)) {
           const provider = evmProvider || getEthereumProvider();
           if (!provider) throw new Error("No Ethereum wallet connected.");
-          await ensureBaseNetwork(provider);
-          // Use x402 for EVM
+          await ensureEvmNetwork(provider, selectedNetwork);
+          // Use x402 for EVM (Base USDC EIP-3009; Robinhood USDG via Permit2 when facilitator supports it)
           payment = await X402EVM.createPaymentPayload(
             provider,
             accept.network,
