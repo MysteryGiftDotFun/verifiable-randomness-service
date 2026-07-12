@@ -1,6 +1,11 @@
 # Verifiable Randomness Service
 
-This service provides the live Mystery Gift randomness API at `https://rng.mysterygift.fun`.
+This service provides the live Mystery Gift randomness product at `https://rng.mysterygift.fun`.
+
+**Dual mode on the landing page:**
+
+- **HTTP API / x402** — TEE seeds and helpers (`POST /v1/*`) for Miss, raffles, agents  
+- **On-chain Flash VRF** — status + request UI for Phala Flash coordinators used by pack escrows (set `FLASH_VRF_COORDINATOR_*` env after deploy)
 
 ## Current Scope
 

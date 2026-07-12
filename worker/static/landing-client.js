@@ -1550,3 +1550,304 @@ document.addEventListener("DOMContentLoaded", () => {
       if (versionHash) versionHash.innerText = "N/A";
     });
 })();
+
+// ============================================================================
+// Dual mode: HTTP API vs Phala Flash VRF
+// ============================================================================
+var rngMode = "http"; // "http" | "flash"
+var flashChainId = null;
+var FLASH_COORDINATOR_ABI = [
+  "function requestRandomNumber(uint256 seed) returns (uint256)",
+  "function getRequest(uint256 requestId) view returns (tuple(address caller, uint256 seed, uint256 random, bool fulfilled))",
+  "function getRandom(uint256 requestId) view returns (uint256 random, bool fulfilled)",
+  "function requestCount() view returns (uint256)",
+  "function offchainPublicKey() view returns (address)",
+  "function trustedTEE() view returns (address)",
+];
+
+function setRngMode(mode) {
+  rngMode = mode;
+  try {
+    localStorage.setItem("rngMode", mode);
+  } catch (e) {}
+  var httpPanel = document.getElementById("http-mode-panel");
+  var flashPanel = document.getElementById("flash-mode-panel");
+  var modeHttp = document.getElementById("mode-http");
+  var modeFlash = document.getElementById("mode-flash");
+  if (httpPanel) httpPanel.style.display = mode === "http" ? "" : "none";
+  if (flashPanel) flashPanel.style.display = mode === "flash" ? "" : "none";
+  if (modeHttp) modeHttp.classList.toggle("active", mode === "http");
+  if (modeFlash) modeFlash.classList.toggle("active", mode === "flash");
+  if (mode === "flash") {
+    initFlashChainToggle();
+    refreshFlashStatus();
+  }
+  log("Mode: " + (mode === "flash" ? "On-chain Flash VRF" : "HTTP API / x402"));
+}
+
+function getFlashNetworks() {
+  return typeof FLASH_VRF_NETWORKS !== "undefined" && Array.isArray(FLASH_VRF_NETWORKS)
+    ? FLASH_VRF_NETWORKS
+    : [];
+}
+
+function getSelectedFlashNetwork() {
+  var nets = getFlashNetworks();
+  if (!nets.length) return null;
+  if (flashChainId == null) flashChainId = nets[0].id;
+  return nets.find(function (n) {
+    return n.id === flashChainId;
+  }) || nets[0];
+}
+
+function initFlashChainToggle() {
+  var el = document.getElementById("flash-chain-toggle");
+  if (!el) return;
+  var nets = getFlashNetworks();
+  el.innerHTML = "";
+  nets.forEach(function (n, i) {
+    if (flashChainId == null && i === 0) flashChainId = n.id;
+    var btn = document.createElement("button");
+    btn.className = "toggle-opt" + (n.id === flashChainId ? " active" : "");
+    btn.id = "flash-net-" + n.id;
+    btn.textContent = n.label;
+    btn.onclick = function () {
+      flashChainId = n.id;
+      document.querySelectorAll("#flash-chain-toggle .toggle-opt").forEach(function (b) {
+        b.classList.remove("active");
+      });
+      btn.classList.add("active");
+      refreshFlashStatus();
+    };
+    el.appendChild(btn);
+  });
+  updateFlashPackLinks();
+}
+
+function updateFlashPackLinks() {
+  var net = getSelectedFlashNetwork();
+  var el = document.getElementById("flash-pack-links");
+  if (!el || !net) return;
+  var lines = [];
+  lines.push("Chain ID: " + net.chainId);
+  if (net.coordinator) {
+    lines.push(
+      'Coordinator: <a href="' +
+        net.explorer +
+        "/address/" +
+        net.coordinator +
+        '" target="_blank" style="color:var(--accent);">' +
+        net.coordinator.slice(0, 10) +
+        "…</a>",
+    );
+  } else {
+    lines.push("Coordinator: <em>not deployed yet</em>");
+  }
+  if (net.packEscrow721) {
+    lines.push(
+      'PackEscrow721Flash: <a href="' +
+        net.explorer +
+        "/address/" +
+        net.packEscrow721 +
+        '" target="_blank" style="color:var(--accent);">' +
+        net.packEscrow721.slice(0, 10) +
+        "…</a>",
+    );
+  }
+  if (net.packEscrow20) {
+    lines.push(
+      'PackEscrow20Flash: <a href="' +
+        net.explorer +
+        "/address/" +
+        net.packEscrow20 +
+        '" target="_blank" style="color:var(--accent);">' +
+        net.packEscrow20.slice(0, 10) +
+        "…</a>",
+    );
+  }
+  lines.push(
+    'Template: <a href="https://github.com/Phala-Network/phala-cloud-vrf-template" target="_blank" style="color:var(--accent);">phala-cloud-vrf-template</a>',
+  );
+  el.innerHTML = lines.join("<br>");
+}
+
+function flashRpcProvider(net) {
+  if (typeof ethers === "undefined") throw new Error("ethers not loaded");
+  return new ethers.providers.JsonRpcProvider(net.rpcUrl);
+}
+
+async function refreshFlashStatus() {
+  var statusEl = document.getElementById("flash-status");
+  var reqBtn = document.getElementById("flash-req-btn");
+  var net = getSelectedFlashNetwork();
+  updateFlashPackLinks();
+  if (!statusEl || !net) return;
+  if (!net.coordinator) {
+    statusEl.innerHTML =
+      "<span style='color:#FF9500;'>Not deployed</span> on " +
+      net.label +
+      ". HTTP mode is fully live. Set FLASH_VRF_COORDINATOR_* after deploy.";
+    if (reqBtn) reqBtn.disabled = true;
+    return;
+  }
+  statusEl.textContent = "Loading " + net.label + "…";
+  try {
+    var provider = flashRpcProvider(net);
+    var c = new ethers.Contract(net.coordinator, FLASH_COORDINATOR_ABI, provider);
+    var pubkey = await c.offchainPublicKey();
+    var count = await c.requestCount();
+    var tee = await c.trustedTEE();
+    var zero = "0x0000000000000000000000000000000000000000";
+    var configured = pubkey && pubkey.toLowerCase() !== zero;
+    statusEl.innerHTML =
+      "Network: <strong style='color:var(--text-main);'>" +
+      net.label +
+      " (" +
+      net.chainId +
+      ")</strong><br>" +
+      "Coordinator: <strong style='color:var(--text-main);'>" +
+      net.coordinator +
+      "</strong><br>" +
+      "offchainPublicKey: <strong style='color:var(--text-main);'>" +
+      (configured ? pubkey : "unset — fulfills will fail") +
+      "</strong><br>" +
+      "trustedTEE: <strong style='color:var(--text-main);'>" +
+      (tee || "—") +
+      "</strong><br>" +
+      "requestCount: <strong style='color:var(--text-main);'>" +
+      count.toString() +
+      "</strong><br>" +
+      "Status: <strong style='color:" +
+      (configured ? "var(--success)" : "#FF9500") +
+      ";'>" +
+      (configured ? "configured" : "unconfigured") +
+      "</strong>";
+    if (reqBtn) reqBtn.disabled = !configured;
+  } catch (e) {
+    statusEl.innerHTML =
+      "<span style='color:#ff6b6b;'>RPC error:</span> " + (e.message || e);
+    if (reqBtn) reqBtn.disabled = true;
+  }
+}
+
+async function lookupFlashRequest() {
+  var out = document.getElementById("flash-lookup-out");
+  var net = getSelectedFlashNetwork();
+  var idStr = document.getElementById("flash-request-id")?.value;
+  if (!out || !net) return;
+  if (!net.coordinator) {
+    out.textContent = "Coordinator not deployed on this chain.";
+    return;
+  }
+  if (idStr === "" || idStr == null) {
+    out.textContent = "Enter a requestId.";
+    return;
+  }
+  out.textContent = "Loading…";
+  try {
+    var provider = flashRpcProvider(net);
+    var c = new ethers.Contract(net.coordinator, FLASH_COORDINATOR_ABI, provider);
+    var req = await c.getRequest(idStr);
+    var gr = await c.getRandom(idStr);
+    out.innerHTML =
+      "caller: " +
+      req.caller +
+      "<br>seed: " +
+      req.seed.toString() +
+      "<br>random: " +
+      gr.random.toString() +
+      "<br>fulfilled: " +
+      gr.fulfilled;
+  } catch (e) {
+    out.textContent = "Error: " + (e.message || e);
+  }
+}
+
+async function requestFlashRandom() {
+  var net = getSelectedFlashNetwork();
+  if (!net || !net.coordinator) {
+    return log("Flash coordinator not deployed", "error");
+  }
+  if (typeof ethers === "undefined") {
+    return log("ethers not loaded", "error");
+  }
+  try {
+    if (!window.ethereum) {
+      return log("No EVM wallet. Install MetaMask or use an EVM wallet.", "error");
+    }
+    var provider = new ethers.providers.Web3Provider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    var network = await provider.getNetwork();
+    if (Number(network.chainId) !== Number(net.chainId)) {
+      try {
+        await window.ethereum.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: "0x" + Number(net.chainId).toString(16) }],
+        });
+      } catch (switchErr) {
+        return log(
+          "Switch wallet to chain " + net.chainId + " (" + net.label + ")",
+          "error",
+        );
+      }
+      provider = new ethers.providers.Web3Provider(window.ethereum);
+    }
+    var signer = provider.getSigner();
+    var c = new ethers.Contract(net.coordinator, FLASH_COORDINATOR_ABI, signer);
+    var seedRaw = document.getElementById("flash-seed")?.value || "";
+    var seed;
+    if (!seedRaw) {
+      seed = ethers.BigNumber.from(ethers.utils.hexlify(ethers.utils.randomBytes(32)));
+    } else if (seedRaw.startsWith("0x")) {
+      seed = ethers.BigNumber.from(seedRaw);
+    } else {
+      seed = ethers.BigNumber.from(seedRaw);
+    }
+    log("Sending requestRandomNumber…", "info");
+    var tx = await c.requestRandomNumber(seed);
+    log("Tx: " + tx.hash, "info");
+    var receipt = await tx.wait();
+    log("Confirmed in block " + receipt.blockNumber, "success");
+    // Parse requestId from logs if possible
+    try {
+      var iface = new ethers.utils.Interface([
+        "event RequestQueued(uint256 indexed requestId, address indexed caller, uint256 seed)",
+      ]);
+      for (var i = 0; i < receipt.logs.length; i++) {
+        try {
+          var parsed = iface.parseLog(receipt.logs[i]);
+          if (parsed && parsed.name === "RequestQueued") {
+            var rid = parsed.args.requestId.toString();
+            log("requestId = " + rid, "success");
+            var input = document.getElementById("flash-request-id");
+            if (input) input.value = rid;
+            await lookupFlashRequest();
+            break;
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+    await refreshFlashStatus();
+  } catch (e) {
+    log("Flash request failed: " + (e.message || e), "error");
+  }
+}
+
+// Restore mode on load
+(function initRngMode() {
+  try {
+    var saved = localStorage.getItem("rngMode");
+    if (saved === "flash" || saved === "http") {
+      // defer until DOM ready
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", function () {
+          setRngMode(saved);
+        });
+      } else {
+        setTimeout(function () {
+          setRngMode(saved);
+        }, 0);
+      }
+    }
+  } catch (e) {}
+})();

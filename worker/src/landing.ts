@@ -42,6 +42,18 @@ function findStaticFile(fileName: string): string {
 const ATTESTATION_CLIENT_JS = findStaticFile("attestation-client.js");
 const LANDING_CLIENT_JS = findStaticFile("landing-client.js");
 
+/** On-chain Phala Flash VRF coordinator config (pack opens). Separate from HTTP x402 RNG. */
+export interface FlashVrfNetworkConfig {
+  id: string;
+  label: string;
+  chainId: number;
+  rpcUrl: string;
+  coordinator: string;
+  packEscrow721?: string;
+  packEscrow20?: string;
+  explorer: string;
+}
+
 export interface LandingConfig {
   version: string;
   teeType: string;
@@ -58,6 +70,8 @@ export interface LandingConfig {
   composeHash: string;
   nodeUrl: string;
   environment: string;
+  /** Dual-mode: Flash VRF networks (empty coordinator = not deployed yet) */
+  flashVrfNetworks?: FlashVrfNetworkConfig[];
 }
 
 export function renderLandingPage(config: LandingConfig): string {
@@ -76,6 +90,7 @@ export function renderLandingPage(config: LandingConfig): string {
     supportedNetworks,
     arweaveEnabled,
     environment,
+    flashVrfNetworks = [],
   } = config;
 
   const envBadgeClass =
@@ -102,6 +117,49 @@ export function renderLandingPage(config: LandingConfig): string {
     if (n === "robinhood") return "simple-icons:robinhood";
     return "token:eth";
   };
+
+  const defaultFlashNetworks: FlashVrfNetworkConfig[] =
+    flashVrfNetworks.length > 0
+      ? flashVrfNetworks
+      : [
+          {
+            id: "base",
+            label: "Base",
+            chainId: 8453,
+            rpcUrl: baseRpc || "https://mainnet.base.org",
+            coordinator: process.env.FLASH_VRF_COORDINATOR_BASE || "",
+            packEscrow721: process.env.FLASH_PACK_ESCROW_721_BASE || "",
+            explorer: "https://basescan.org",
+          },
+          {
+            id: "base-sepolia",
+            label: "Base Sepolia",
+            chainId: 84532,
+            rpcUrl: "https://sepolia.base.org",
+            coordinator: process.env.FLASH_VRF_COORDINATOR_BASE_SEPOLIA || "",
+            packEscrow721: process.env.FLASH_PACK_ESCROW_721_BASE_SEPOLIA || "",
+            explorer: "https://sepolia.basescan.org",
+          },
+          {
+            id: "rh",
+            label: "Robinhood",
+            chainId: 4663,
+            rpcUrl: robinhoodRpc,
+            coordinator: process.env.FLASH_VRF_COORDINATOR_RH || "",
+            packEscrow20: process.env.FLASH_PACK_ESCROW_20_RH || "",
+            explorer: "https://robinhoodchain.blockscout.com",
+          },
+          {
+            id: "rh-testnet",
+            label: "RH Testnet",
+            chainId: 46630,
+            rpcUrl: "https://rpc.testnet.chain.robinhood.com",
+            coordinator: process.env.FLASH_VRF_COORDINATOR_RH_TESTNET || "",
+            packEscrow20: process.env.FLASH_PACK_ESCROW_20_RH_TESTNET || "",
+            explorer: "https://explorer.testnet.chain.robinhood.com",
+          },
+        ];
+  const flashVrfJson = JSON.stringify(defaultFlashNetworks);
 
   return `
 <!DOCTYPE html>
@@ -649,6 +707,20 @@ ${renderTeeAttestationStyles()}
         <!-- RUN -->
         <div id="v-run" class="tab-view active">
           <div class="card">
+            <div style="margin-bottom:0.5rem; font-size:0.75rem; color:var(--text-muted);">Randomness mode</div>
+            <div class="toggle-group" id="rng-mode-toggle">
+              <button class="toggle-opt active" id="mode-http" onclick="setRngMode('http')">HTTP API / x402</button>
+              <button class="toggle-opt" id="mode-flash" onclick="setRngMode('flash')">On-chain Flash VRF</button>
+            </div>
+            <p style="font-size:0.7rem; color:var(--text-muted); margin-top:0.6rem; line-height:1.4;">
+              <strong style="color:var(--text-main);">HTTP</strong> = paid TEE seed for agents/raffles.
+              <strong style="color:var(--text-main);">Flash</strong> = on-chain request/fulfill for pack escrows (not x402).
+            </p>
+          </div>
+
+          <!-- HTTP mode (current Mystery Gift product) -->
+          <div id="http-mode-panel">
+          <div class="card">
             <div class="custom-dropdown" id="op-dropdown">
               <div class="dropdown-selected" onclick="toggleDropdown()">Raw Randomness (Seed)</div>
               <div class="dropdown-options">
@@ -701,7 +773,7 @@ ${renderTeeAttestationStyles()}
           </div>
 
           <div class="card">
-            <div style="margin-bottom:0.5rem; font-size:0.75rem; color:var(--text-muted);">Network</div>
+            <div style="margin-bottom:0.5rem; font-size:0.75rem; color:var(--text-muted);">Payment network</div>
             <div class="toggle-group" id="network-toggle">
               ${supportedNetworks.map((n, i) => `<button class="toggle-opt${i === 0 ? " active" : ""}" id="net-${n}" onclick="setNetwork('${n}')"><iconify-icon icon="${networkIcon(n)}" style="vertical-align:middle; margin-right:4px;"></iconify-icon>${n.toUpperCase()}</button>`).join("\n              ")}
             </div>
@@ -714,6 +786,59 @@ ${renderTeeAttestationStyles()}
                If provided, the Arweave proof will be encrypted with AES-256-GCM. Share the passphrase with authorized parties.
              </div>
           </div>
+          </div><!-- /http-mode-panel -->
+
+          <!-- Flash VRF mode (on-chain packs) -->
+          <div id="flash-mode-panel" style="display:none;">
+            <div class="card" style="border-color: var(--accent-glow);">
+              <span class="card-label" style="color:var(--accent);">Phala Flash VRF</span>
+              <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.5; margin:0.4rem 0 0;">
+                On-chain coordinator: request → TEE ECDSA fulfill → pack escrow settle.
+                Trust root = Phala TEE + registered pubkey (not Chainlink ECVRF). Gas paid on-chain — no x402.
+              </p>
+            </div>
+
+            <div class="card">
+              <div style="margin-bottom:0.5rem; font-size:0.75rem; color:var(--text-muted);">Chain</div>
+              <div class="toggle-group" id="flash-chain-toggle"></div>
+            </div>
+
+            <div class="card">
+              <span class="card-label">Coordinator status</span>
+              <div id="flash-status" style="font-size:0.75rem; color:var(--text-muted); line-height:1.7; margin-top:0.5rem;">
+                Select a chain and refresh.
+              </div>
+              <button class="std-btn" style="width:100%; margin-top:0.75rem;" onclick="refreshFlashStatus()">
+                <iconify-icon icon="ph:arrows-clockwise" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
+                Refresh status
+              </button>
+            </div>
+
+            <div class="card">
+              <span class="card-label">Lookup request</span>
+              <input type="number" class="sleek-input" id="flash-request-id" placeholder="requestId (0, 1, 2…)" min="0">
+              <button class="std-btn" style="width:100%; margin-top:0.5rem;" onclick="lookupFlashRequest()">
+                getRequest / getRandom
+              </button>
+              <div id="flash-lookup-out" class="hash-display" style="margin-top:0.75rem; font-size:0.7rem; min-height:2.5rem;"></div>
+            </div>
+
+            <div class="card">
+              <span class="card-label">Request random (on-chain)</span>
+              <input type="text" class="sleek-input" id="flash-seed" placeholder="Seed (uint / hex) — optional">
+              <button class="cyber-btn" id="flash-req-btn" onclick="requestFlashRandom()" style="margin-top:0.75rem;" disabled>
+                <iconify-icon icon="ph:lightning-fill"></iconify-icon> REQUEST ON-CHAIN
+              </button>
+              <p style="font-size:0.7rem; color:var(--text-muted); margin-top:0.5rem;">
+                Requires EVM wallet on the selected chain with gas. Coordinator must be deployed.
+              </p>
+            </div>
+
+            <div class="card">
+              <span class="card-label">Pack contracts</span>
+              <div id="flash-pack-links" style="font-size:0.75rem; color:var(--text-muted); line-height:1.7;"></div>
+            </div>
+          </div><!-- /flash-mode-panel -->
         </div>
 
         <!-- VERIFY -->
@@ -756,14 +881,28 @@ ${renderTeeAttestationAuditCard(appId)}
           <div class="card" style="margin-top:1rem; border-color:rgba(255, 77, 0, 0.3);">
             <span class="card-label" style="color:var(--accent);">
               <iconify-icon icon="ph:archive-box-fill" style="vertical-align:text-bottom; margin-right:0.3rem;"></iconify-icon>
-              Arweave Verification
+              Arweave Verification (HTTP mode)
             </span>
             <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.8rem; line-height:1.5;">
-              Each response includes a <code style="color:var(--accent);">commitment_hash</code> stored on Arweave. Verify by computing:
+              Each HTTP response includes a <code style="color:var(--accent);">commitment_hash</code> stored on Arweave. Verify by computing:
             </p>
             <div style="background:rgba(0,0,0,0.4); border:1px solid var(--panel-border); border-radius:8px; padding:0.75rem;">
               <code style="font-size:0.75rem; color:var(--text-main);">SHA256(seed + request_hash) == commitment_hash</code>
             </div>
+          </div>
+
+          <div class="card" style="margin-top:1rem; border-color:var(--accent-glow);">
+            <span class="card-label" style="color:var(--accent);">Flash VRF verification (on-chain)</span>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.6rem; line-height:1.5;">
+              Flash CVM may be a <strong style="color:var(--text-main);">separate</strong> Phala instance from this HTTP RNG node.
+              On-chain proof = ECDSA recovery of TEE signing key registered as <code>offchainPublicKey</code>.
+            </p>
+            <div style="background:rgba(0,0,0,0.4); border:1px solid var(--panel-border); border-radius:8px; padding:0.75rem; font-size:0.7rem; color:var(--text-main); line-height:1.5;">
+              eth_sign(keccak256(abi.encode(requestId, seed, random))) → ecrecover == offchainPublicKey
+            </div>
+            <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.6rem;">
+              Use EXECUTE → Flash VRF to read coordinator status and request lookups.
+            </p>
           </div>
         </div>
 
@@ -772,35 +911,38 @@ ${renderTeeAttestationAuditCard(appId)}
           <div class="card">
             <span class="card-label">Overview</span>
             <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5;">
-              Intel TDX powered verifiable randomness. Secure, hardware-enforced generation with remote attestation proofs.<br><br>
+              Intel TDX powered verifiable randomness with two delivery modes:
+              <strong style="color:var(--text-main);">HTTP API</strong> (x402) and
+              <strong style="color:var(--text-main);">Phala Flash VRF</strong> (on-chain for packs).<br><br>
               <span style="color:#FF9500;">EXPERIMENTAL SOFTWARE — Use at your own risk</span>
             </p>
           </div>
 
           <div class="card" style="border-color: var(--accent-glow);">
-            <div style="font-size:3.4rem; font-weight:800; color:var(--text-main); line-height:1;">$0.01 <span style="font-size:1.05rem; color:var(--text-muted);">/ req</span></div>
-            <div style="margin-top:0.8rem; font-size:0.8rem; color:var(--text-muted);">
-              Pay via x402 (${payNetworksLabel}) &bull; 90% cheaper than Chainlink and Switchboard VRF
+            <div style="font-size:1.1rem; font-weight:700; color:var(--text-main); margin-bottom:0.5rem;">Pricing</div>
+            <div style="font-size:0.85rem; color:var(--text-muted); line-height:1.7;">
+              <div><strong style="color:var(--text-main);">HTTP</strong> — $0.01 / req via x402 (${payNetworksLabel})</div>
+              <div><strong style="color:var(--text-main);">Flash</strong> — L2 gas only + operator CVM rent (no per-req x402)</div>
             </div>
           </div>
 
           <div class="card">
-            <span class="card-label">Use Cases</span>
+            <span class="card-label">When to use which</span>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.75rem;">
-              <div class="hash-display" style="padding:0.5rem; margin:0;">NFT Mints</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">Gacha / Loot</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">Casino Games</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">Tournaments</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">PvP Selection</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">HTTP</strong><br>Miss tools, raffles, agents</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Flash</strong><br>PackEscrow open (Base / RH)</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">Dice / pick / shuffle</div>
+              <div class="hash-display" style="padding:0.5rem; margin:0;">NFT &amp; equity packs</div>
             </div>
           </div>
 
           <div class="card">
             <span class="card-label">Service Info</span>
             <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.7;">
-              <div>Arweave Proofs: <strong style="color:var(--text-main);">${arweaveEnabled ? "Enabled" : "Disabled"}</strong></div>
-              <div>Networks: <strong style="color:var(--text-main);">${supportedNetworks.join(", ")}</strong></div>
+              <div>Arweave Proofs (HTTP): <strong style="color:var(--text-main);">${arweaveEnabled ? "Enabled" : "Disabled"}</strong></div>
+              <div>x402 Networks: <strong style="color:var(--text-main);">${supportedNetworks.join(", ")}</strong></div>
               <div>Facilitator: <strong style="color:var(--text-main);">PayAI</strong></div>
+              <div>Public packs: <strong style="color:var(--text-main);">escrow contracts — not TEE vault</strong></div>
             </div>
           </div>
         </div>
@@ -808,25 +950,43 @@ ${renderTeeAttestationAuditCard(appId)}
         <!-- GUIDE -->
         <div id="v-guide" class="tab-view">
           <div class="card">
-            <span class="card-label">Quick Start</span>
+            <span class="card-label">HTTP API — Quick Start</span>
             <div style="font-size:0.85rem; color:var(--text-muted); line-height:1.8;">
               <div style="margin-bottom:0.6rem; display:flex; gap:10px;">
                 <span style="color:var(--accent); font-weight:700;">1.</span>
-                <span>Connect wallet & select network</span>
+                <span>Select mode <strong style="color:var(--text-main);">HTTP API / x402</strong></span>
               </div>
               <div style="margin-bottom:0.6rem; display:flex; gap:10px;">
                 <span style="color:var(--accent); font-weight:700;">2.</span>
-                <span>Choose operation type (see below)</span>
+                <span>Connect wallet &amp; payment network</span>
               </div>
               <div style="display:flex; gap:10px;">
                 <span style="color:var(--accent); font-weight:700;">3.</span>
-                <span>Pay $0.01 via x402 & get result</span>
+                <span>Pay $0.01 via x402 &amp; get TEE seed / dice / pick</span>
               </div>
             </div>
           </div>
 
           <div class="card">
-            <span class="card-label">Operations</span>
+            <span class="card-label">Flash VRF — Quick Start</span>
+            <div style="font-size:0.85rem; color:var(--text-muted); line-height:1.8;">
+              <div style="margin-bottom:0.6rem; display:flex; gap:10px;">
+                <span style="color:var(--accent); font-weight:700;">1.</span>
+                <span>Select mode <strong style="color:var(--text-main);">On-chain Flash VRF</strong></span>
+              </div>
+              <div style="margin-bottom:0.6rem; display:flex; gap:10px;">
+                <span style="color:var(--accent); font-weight:700;">2.</span>
+                <span>Pick Base / RH chain; refresh coordinator status</span>
+              </div>
+              <div style="display:flex; gap:10px;">
+                <span style="color:var(--accent); font-weight:700;">3.</span>
+                <span>Request on-chain (gas) or lookup requestId; packs call this automatically on buy</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <span class="card-label">HTTP Operations</span>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.75rem;">
               <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Randomness</strong><br><span style="color:var(--text-muted);">256-bit seed</span></div>
               <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Number</strong><br><span style="color:var(--text-muted);">Integer in range</span></div>
@@ -841,14 +1001,14 @@ ${renderTeeAttestationAuditCard(appId)}
           <div class="card">
             <span class="card-label">What is x402?</span>
             <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5; margin:0;">
-              Pay-per-request via <a href="https://www.x402.org" target="_blank" style="color:var(--accent);">HTTP 402 headers</a>.
+              Pay-per-request via <a href="https://www.x402.org" target="_blank" style="color:var(--accent);">HTTP 402 headers</a> (HTTP mode only).
             </p>
           </div>
 
           <div class="card">
             <span class="card-label">Verification</span>
             <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5;">
-              Every response includes a TEE attestation. Use <strong style="color:var(--text-main);">AUDIT</strong> tab to verify hardware signature.
+              HTTP: TEE attestation + optional Arweave. Flash: on-chain ECDSA. Use <strong style="color:var(--text-main);">AUDIT</strong>.
             </p>
           </div>
         </div>
@@ -856,7 +1016,7 @@ ${renderTeeAttestationAuditCard(appId)}
         <!-- API -->
         <div id="v-api" class="tab-view">
           <div class="card">
-            <span class="card-label">POST Endpoints</span>
+            <span class="card-label">HTTP POST Endpoints (x402)</span>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.75rem;">
               <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/randomness</div>
               <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/number</div>
@@ -865,6 +1025,16 @@ ${renderTeeAttestationAuditCard(appId)}
               <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/shuffle</div>
               <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/winners</div>
               <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/uuid</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <span class="card-label">Flash VRF (Solidity)</span>
+            <div style="font-size:0.75rem; color:var(--text-muted); line-height:1.7;">
+              <div><code style="color:var(--text-main);">requestRandomNumber(uint256 seed)</code> → requestId</div>
+              <div><code style="color:var(--text-main);">onRandomGenerated(id, random, sig)</code> TEE fulfill</div>
+              <div><code style="color:var(--text-main);">getRandom(requestId)</code> → (random, fulfilled)</div>
+              <div style="margin-top:0.4rem;">Consumers: <code>PackEscrow721Flash</code> / <code>PackEscrow20Flash</code></div>
             </div>
           </div>
 
@@ -927,6 +1097,8 @@ ${renderTeeAttestationAuditCard(appId)}
       base: 'eip155:8453',
       robinhood: 'eip155:4663'
     };
+    // Dual-mode: Phala Flash VRF coordinators (empty coordinator = not deployed)
+    var FLASH_VRF_NETWORKS = ${flashVrfJson};
   </script>
   
   <!-- Inlined landing-client.js to avoid Cloudflare Access blocking -->
