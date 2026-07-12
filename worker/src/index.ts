@@ -110,10 +110,11 @@ const CAIP_ROBINHOOD_MAINNET = "eip155:4663";
 const CAIP_ROBINHOOD_TESTNET = "eip155:46630";
 
 function buildX402Accepts(price: string = "$0.01") {
+  // network must be CAIP-2 (`namespace:reference`) for @x402 PaymentOption typing
   const accepts: Array<{
     scheme: "exact";
     price: string;
-    network: string;
+    network: `${string}:${string}`;
     payTo: string;
     asset?: string;
   }> = [

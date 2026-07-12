@@ -1,6 +1,6 @@
 services:
   randomness-prod:
-    image: ghcr.io/thomasjvu/vrf-service:0.1.8-BETA.4
+    image: ghcr.io/thomasjvu/vrf-service:0.1.8-BETA.5
     ports:
       - "3000:3000"
     environment:
