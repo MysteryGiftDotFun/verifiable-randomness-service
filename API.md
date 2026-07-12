@@ -4,6 +4,15 @@ Detailed API reference for the Verifiable Randomness (TEE) Service.
 
 **Base URL**: `https://rng.mysterygift.fun`
 
+This service powers **two** randomness delivery modes from the same product surface:
+
+| Mode | How | Use |
+| --- | --- | --- |
+| **HTTP API (x402)** | `POST /v1/*` on this host | Miss, raffles, agents, dice/pick — **live** |
+| **Phala Flash VRF** | On-chain coordinator (per Base / RH deploy) | Permissionless pack opens — configure env after deploy |
+
+The landing page (`/`) has an EXECUTE toggle: **HTTP API / x402** vs **On-chain Flash VRF**.
+
 ---
 
 ## Table of Contents
