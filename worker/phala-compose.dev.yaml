@@ -1,6 +1,6 @@
 services:
   randomness-dev:
-    image: ghcr.io/thomasjvu/vrf-service:0.1.8-BETA.5
+    image: ghcr.io/thomasjvu/vrf-service:0.1.8-BETA.6
     ports:
       - "3000:3000"
     environment:
@@ -8,7 +8,7 @@ services:
       - NODE_ENV=development
       - APP_ENVIRONMENT=development
       - ENVIRONMENT=development
-      - APP_VERSION=${APP_VERSION:-0.1.7-BETA}
+      - APP_VERSION=\${APP_VERSION:-0.1.8-BETA.6}
       - PAYMENT_WALLET=${PAYMENT_WALLET:?PAYMENT_WALLET is required}
       - PAYMENT_WALLET_BASE=${PAYMENT_WALLET_BASE:-}
       - HELIUS_RPC_URL=${HELIUS_RPC_URL:?HELIUS_RPC_URL is required}

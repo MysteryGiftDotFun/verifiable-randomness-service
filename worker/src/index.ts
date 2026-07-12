@@ -1321,6 +1321,10 @@ app.get("/", (_req: Request, res: Response) => {
     composeHash,
     nodeUrl,
     environment: process.env.APP_ENVIRONMENT || "development",
+    reownProjectId:
+      process.env.REOWN_PROJECT_ID ||
+      process.env.VITE_REOWN_PROJECT_ID ||
+      "",
   });
 
   res.setHeader("Cache-Control", "no-store");

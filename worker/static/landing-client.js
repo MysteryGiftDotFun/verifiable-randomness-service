@@ -885,11 +885,15 @@ function updateTeeIdentity(data) {
 }
 
 async function initNetwork() {
-  log("Initializing " + selectedNetwork.toUpperCase() + "...");
-
+  log("Network: " + selectedNetwork.toUpperCase());
+  // Prefer Reown modal when configured; otherwise legacy inject
+  if (hasReownProjectId()) {
+    await connectViaReown();
+    return;
+  }
   if (selectedNetwork === "solana") {
     if (!window.solana) {
-      log("No Solana wallet found. Install Phantom or Solflare.", "error");
+      log("No Solana wallet. Set REOWN_PROJECT_ID for Reown modal.", "error");
       return;
     }
     try {
@@ -959,9 +963,171 @@ function setNetwork(network) {
   log("Network changed to " + network.toUpperCase());
 }
 
+// ---------------------------------------------------------------------------
+// Reown AppKit (preferred) — unified modal for Solana + EVM
+// ---------------------------------------------------------------------------
+var reownModal = null;
+var reownInitPromise = null;
+
+function hasReownProjectId() {
+  return (
+    typeof REOWN_PROJECT_ID === "string" &&
+    REOWN_PROJECT_ID.length > 8 &&
+    REOWN_PROJECT_ID !== "undefined"
+  );
+}
+
+function reownRobinhoodNetwork() {
+  return {
+    id: 4663,
+    name: "Robinhood Chain",
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    rpcUrls: { default: { http: [ROBINHOOD_RPC_URL || "https://rpc.mainnet.chain.robinhood.com"] } },
+    blockExplorers: {
+      default: { name: "Blockscout", url: "https://robinhoodchain.blockscout.com" },
+    },
+    chainNamespace: "eip155",
+    caipNetworkId: "eip155:4663",
+  };
+}
+
+async function initReownModal() {
+  if (reownModal) return reownModal;
+  if (!hasReownProjectId()) return null;
+  if (reownInitPromise) return reownInitPromise;
+
+  reownInitPromise = (async function () {
+    try {
+      // Vanilla AppKit (no React) via ESM CDN
+      const appkit = await import(
+        "https://esm.sh/@reown/appkit@1.7.8?bundle"
+      );
+      const ethersAdapterMod = await import(
+        "https://esm.sh/@reown/appkit-adapter-ethers@1.7.8?bundle"
+      );
+      const solanaAdapterMod = await import(
+        "https://esm.sh/@reown/appkit-adapter-solana@1.7.8?bundle"
+      );
+      const networks = await import(
+        "https://esm.sh/@reown/appkit@1.7.8/networks?bundle"
+      );
+
+      const createAppKit = appkit.createAppKit || appkit.default?.createAppKit;
+      const EthersAdapter =
+        ethersAdapterMod.EthersAdapter || ethersAdapterMod.default?.EthersAdapter;
+      const SolanaAdapter =
+        solanaAdapterMod.SolanaAdapter || solanaAdapterMod.default?.SolanaAdapter;
+      if (!createAppKit || !EthersAdapter) {
+        throw new Error("AppKit createAppKit / EthersAdapter missing from CDN");
+      }
+
+      const baseNet = networks.base || networks.baseMainnet;
+      const solanaNet = networks.solana;
+      const evmNetworks = [baseNet, reownRobinhoodNetwork()].filter(Boolean);
+      const allNetworks = solanaNet
+        ? [baseNet, reownRobinhoodNetwork(), solanaNet]
+        : evmNetworks;
+
+      const adapters = [new EthersAdapter()];
+      if (SolanaAdapter && solanaNet) {
+        try {
+          adapters.push(new SolanaAdapter());
+        } catch (e) {
+          console.warn("[Reown] Solana adapter init skipped", e);
+        }
+      }
+
+      reownModal = createAppKit({
+        adapters: adapters,
+        networks: allNetworks,
+        projectId: REOWN_PROJECT_ID,
+        metadata: {
+          name: "Mystery Gift RNG",
+          description: "TEE verifiable randomness",
+          url: "https://rng.mysterygift.fun",
+          icons: ["https://rng.mysterygift.fun/assets/miss.png"],
+        },
+        features: { analytics: false },
+        themeMode: "dark",
+      });
+
+      // Sync account into landing-client state
+      try {
+        reownModal.subscribeAccount(function (state) {
+          if (state && state.isConnected && state.address) {
+            setConnectedWallet(state.address);
+            // EVM provider for x402 / Flash
+            try {
+              if (typeof ethers !== "undefined" && window.ethereum) {
+                evmProvider = new ethers.providers.Web3Provider(
+                  getEthereumProvider() || window.ethereum,
+                );
+              }
+            } catch (e) {}
+          } else if (state && !state.isConnected) {
+            wallet = null;
+            evmProvider = null;
+            const connectBtn = document.getElementById("connect-btn");
+            const genBtn = document.getElementById("gen-btn");
+            if (connectBtn) {
+              connectBtn.innerHTML =
+                '<iconify-icon icon="ph:wallet-fill"></iconify-icon> CONNECT';
+              connectBtn.classList.remove("connected");
+            }
+            if (genBtn) genBtn.disabled = true;
+          }
+        });
+      } catch (e) {
+        console.warn("[Reown] subscribeAccount unavailable", e);
+      }
+
+      log("Reown AppKit ready", "success");
+      return reownModal;
+    } catch (e) {
+      console.error("[Reown] init failed", e);
+      log("Reown init failed — using injected wallet fallback", "error");
+      reownInitPromise = null;
+      return null;
+    }
+  })();
+
+  return reownInitPromise;
+}
+
+async function connectViaReown() {
+  const modal = await initReownModal();
+  if (!modal) return false;
+  try {
+    // Prefer open modal; fall back to connect if open is unavailable
+    if (typeof modal.open === "function") {
+      await modal.open({ view: "Connect" });
+    } else if (typeof modal.openModal === "function") {
+      await modal.openModal();
+    } else {
+      return false;
+    }
+    log("Open Reown wallet modal…", "info");
+    return true;
+  } catch (e) {
+    log("Reown connect: " + (e.message || e), "error");
+    return false;
+  }
+}
+
+async function disconnectViaReown() {
+  try {
+    if (reownModal && typeof reownModal.disconnect === "function") {
+      await reownModal.disconnect();
+    }
+  } catch (e) {}
+}
+
 // Toggle wallet connect/disconnect (called from onclick in HTML)
 async function toggleWallet() {
   if (wallet) {
+    try {
+      await disconnectViaReown();
+    } catch (e) {}
     try {
       if (window.solana?.disconnect) await window.solana.disconnect();
     } catch (e) {}
@@ -971,34 +1137,51 @@ async function toggleWallet() {
     const genBtn = document.getElementById("gen-btn");
     if (connectBtn) {
       connectBtn.innerHTML =
-        '<iconify-icon icon="ph:wallet-fill"></iconify-icon> CONNECT WALLET';
+        '<iconify-icon icon="ph:wallet-fill"></iconify-icon> CONNECT';
       connectBtn.classList.remove("connected");
     }
     if (genBtn) genBtn.disabled = true;
     log("Wallet disconnected");
-  } else {
-    if (selectedNetwork === "solana") {
-      if (!window.solana)
-        return log(
-          "No Solana wallet found. Install Phantom or Solflare.",
-          "error",
-        );
-      try {
-        try {
-          await window.solana.disconnect();
-        } catch (e) {}
-        const r = await window.solana.connect();
-        setConnectedWallet(r.publicKey.toString());
-        log(
-          "Wallet connected: " + wallet.slice(0, 6) + "..." + wallet.slice(-4),
-        );
-      } catch (e) {
-        log("Wallet connection failed: " + e.message, "error");
-      }
-    } else if (isEvmPaymentNetwork(selectedNetwork)) {
-      await connectEvmWallet();
-    }
+    return;
   }
+
+  // Preferred: Reown AppKit modal (multichain)
+  if (hasReownProjectId()) {
+    const ok = await connectViaReown();
+    if (ok) return;
+  } else {
+    log(
+      "REOWN_PROJECT_ID not set — falling back to injected wallets. Set env + redeploy for Reown modal.",
+      "info",
+    );
+  }
+
+  // Fallback: injected wallets only
+  if (selectedNetwork === "solana") {
+    if (!window.solana)
+      return log("No Solana wallet injected. Enable Reown or install a wallet.", "error");
+    try {
+      try {
+        await window.solana.disconnect();
+      } catch (e) {}
+      const r = await window.solana.connect();
+      setConnectedWallet(r.publicKey.toString());
+      log("Wallet connected: " + wallet.slice(0, 6) + "..." + wallet.slice(-4));
+    } catch (e) {
+      log("Wallet connection failed: " + e.message, "error");
+    }
+  } else if (isEvmPaymentNetwork(selectedNetwork)) {
+    await connectEvmWallet();
+  }
+}
+
+// Prefetch Reown when project id is present
+if (typeof document !== "undefined") {
+  document.addEventListener("DOMContentLoaded", function () {
+    if (hasReownProjectId()) {
+      initReownModal().catch(function () {});
+    }
+  });
 }
 
 // Generate randomness (called from onclick in HTML)
@@ -1772,15 +1955,23 @@ async function requestFlashRandom() {
     return log("ethers not loaded", "error");
   }
   try {
-    if (!window.ethereum) {
-      return log("No EVM wallet. Install MetaMask or use an EVM wallet.", "error");
+    // Prefer Reown / already-connected EVM provider
+    if (hasReownProjectId() && !wallet) {
+      await connectViaReown();
     }
-    var provider = new ethers.providers.Web3Provider(window.ethereum);
+    var raw =
+      (evmProvider && evmProvider.provider) ||
+      getEthereumProvider() ||
+      window.ethereum;
+    if (!raw) {
+      return log("Connect an EVM wallet first (Reown).", "error");
+    }
+    var provider = new ethers.providers.Web3Provider(raw);
     await provider.send("eth_requestAccounts", []);
     var network = await provider.getNetwork();
     if (Number(network.chainId) !== Number(net.chainId)) {
       try {
-        await window.ethereum.request({
+        await raw.request({
           method: "wallet_switchEthereumChain",
           params: [{ chainId: "0x" + Number(net.chainId).toString(16) }],
         });
@@ -1790,7 +1981,7 @@ async function requestFlashRandom() {
           "error",
         );
       }
-      provider = new ethers.providers.Web3Provider(window.ethereum);
+      provider = new ethers.providers.Web3Provider(raw);
     }
     var signer = provider.getSigner();
     var c = new ethers.Contract(net.coordinator, FLASH_COORDINATOR_ABI, signer);

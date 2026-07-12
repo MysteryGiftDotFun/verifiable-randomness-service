@@ -1,5 +1,5 @@
 # Spectre / amd64 builder: base on previous GHCR release when Docker Hub is unreachable.
-FROM ghcr.io/thomasjvu/vrf-service:0.1.8-BETA.4
+FROM ghcr.io/thomasjvu/vrf-service:0.1.8-BETA.5
 USER root
 WORKDIR /app
 COPY package.json tsconfig.json ./

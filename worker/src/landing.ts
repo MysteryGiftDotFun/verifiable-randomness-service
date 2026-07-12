@@ -72,6 +72,8 @@ export interface LandingConfig {
   environment: string;
   /** Dual-mode: Flash VRF networks (empty coordinator = not deployed yet) */
   flashVrfNetworks?: FlashVrfNetworkConfig[];
+  /** Reown AppKit project id (dashboard.reown.com) */
+  reownProjectId?: string;
 }
 
 export function renderLandingPage(config: LandingConfig): string {
@@ -91,6 +93,7 @@ export function renderLandingPage(config: LandingConfig): string {
     arweaveEnabled,
     environment,
     flashVrfNetworks = [],
+    reownProjectId = "",
   } = config;
 
   const envBadgeClass =
@@ -669,7 +672,7 @@ ${renderTeeAttestationStyles()}
     <div class="hero" id="hero-section">
       <div class="wallet-container-hero">
         <button class="wallet-btn" id="connect-btn" onclick="toggleWallet()">
-          <iconify-icon icon="ph:wallet-fill"></iconify-icon> CONNECT WALLET
+          <iconify-icon icon="ph:wallet-fill"></iconify-icon> CONNECT
         </button>
       </div>
 
@@ -707,242 +710,124 @@ ${renderTeeAttestationStyles()}
         <!-- RUN -->
         <div id="v-run" class="tab-view active">
           <div class="card">
-            <div style="margin-bottom:0.5rem; font-size:0.75rem; color:var(--text-muted);">Randomness mode</div>
             <div class="toggle-group" id="rng-mode-toggle">
-              <button class="toggle-opt active" id="mode-http" onclick="setRngMode('http')">HTTP API / x402</button>
-              <button class="toggle-opt" id="mode-flash" onclick="setRngMode('flash')">On-chain Flash VRF</button>
+              <button class="toggle-opt active" id="mode-http" onclick="setRngMode('http')">HTTP · $0.01</button>
+              <button class="toggle-opt" id="mode-flash" onclick="setRngMode('flash')">Flash · on-chain</button>
             </div>
-            <p style="font-size:0.7rem; color:var(--text-muted); margin-top:0.6rem; line-height:1.4;">
-              <strong style="color:var(--text-main);">HTTP</strong> = paid TEE seed for agents/raffles.
-              <strong style="color:var(--text-main);">Flash</strong> = on-chain request/fulfill for pack escrows (not x402).
+            <p style="font-size:0.7rem; color:var(--text-muted); margin-top:0.55rem; line-height:1.35;">
+              HTTP: agents &amp; tools via x402 · Flash: pack escrow VRF (gas only)
             </p>
           </div>
 
-          <!-- HTTP mode (current Mystery Gift product) -->
           <div id="http-mode-panel">
           <div class="card">
             <div class="custom-dropdown" id="op-dropdown">
-              <div class="dropdown-selected" onclick="toggleDropdown()">Raw Randomness (Seed)</div>
+              <div class="dropdown-selected" onclick="toggleDropdown()">Raw seed</div>
               <div class="dropdown-options">
-                <div class="dropdown-option selected" data-value="randomness">Raw Randomness (Seed)</div>
-                <div class="dropdown-option" data-value="number">Random Number</div>
-                <div class="dropdown-option" data-value="dice">Roll Dice</div>
-                <div class="dropdown-option" data-value="pick">Pick Item</div>
-                <div class="dropdown-option" data-value="shuffle">Shuffle List</div>
-                <div class="dropdown-option" data-value="uuid">Generate UUID</div>
-                <div class="dropdown-option" data-value="winners">Pick Winners</div>
+                <div class="dropdown-option selected" data-value="randomness">Raw seed</div>
+                <div class="dropdown-option" data-value="number">Number</div>
+                <div class="dropdown-option" data-value="dice">Dice</div>
+                <div class="dropdown-option" data-value="pick">Pick</div>
+                <div class="dropdown-option" data-value="shuffle">Shuffle</div>
+                <div class="dropdown-option" data-value="uuid">UUID</div>
+                <div class="dropdown-option" data-value="winners">Winners</div>
               </div>
             </div>
             <input type="hidden" id="op-type" value="randomness">
-
             <div id="inputs-number" style="display:none">
-              <input type="number" class="sleek-input" id="in-min" placeholder="Min Value (Default: 1)">
-              <input type="number" class="sleek-input" id="in-max" placeholder="Max Value (Default: 100)">
+              <input type="number" class="sleek-input" id="in-min" placeholder="Min (1)">
+              <input type="number" class="sleek-input" id="in-max" placeholder="Max (100)">
             </div>
-
             <div id="inputs-dice" style="display:none">
-              <input type="text" class="sleek-input" id="in-dice" placeholder="Format: 2d6, 1d20">
+              <input type="text" class="sleek-input" id="in-dice" placeholder="e.g. 2d6">
             </div>
-
             <div id="inputs-pick" style="display:none">
-              <input type="text" class="sleek-input" id="in-items" placeholder="Items (Comma separated)">
+              <input type="text" class="sleek-input" id="in-items" placeholder="a, b, c">
             </div>
-
             <div id="inputs-shuffle" style="display:none">
-              <input type="text" class="sleek-input" id="in-shuffle-items" placeholder="Items to Shuffle (Comma separated)">
+              <input type="text" class="sleek-input" id="in-shuffle-items" placeholder="a, b, c">
             </div>
-
             <div id="inputs-winners" style="display:none">
-              <input type="text" class="sleek-input" id="in-winners-items" placeholder="Candidates (Comma separated)">
-              <input type="number" class="sleek-input" id="in-count" placeholder="Number of Winners (Default: 1)">
+              <input type="text" class="sleek-input" id="in-winners-items" placeholder="candidates">
+              <input type="number" class="sleek-input" id="in-count" placeholder="count">
             </div>
-
-            <!-- CYBERPUNK BUTTON -->
-            <button class="cyber-btn" id="gen-btn" onclick="generate()" disabled style="margin-top:1rem;">
-              <iconify-icon icon="ph:lightning-fill"></iconify-icon> INITIALIZE RANDOMNESS
+            <div style="margin:0.75rem 0 0.4rem; font-size:0.7rem; color:var(--text-muted);">Pay on</div>
+            <div class="toggle-group" id="network-toggle">
+              ${supportedNetworks.map((n, i) => `<button class="toggle-opt${i === 0 ? " active" : ""}" id="net-${n}" onclick="setNetwork('${n}')"><iconify-icon icon="${networkIcon(n)}" style="vertical-align:middle; margin-right:4px;"></iconify-icon>${n.toUpperCase()}</button>`).join("")}
+            </div>
+            <input type="text" class="sleek-input" id="in-passphrase" style="margin-top:0.75rem;"
+                   placeholder="Optional: encrypt Arweave proof">
+            <button class="cyber-btn" id="gen-btn" onclick="generate()" disabled style="margin-top:0.85rem;">
+              <iconify-icon icon="ph:lightning-fill"></iconify-icon> RUN · $0.01
             </button>
           </div>
-
-          <div class="card" style="border-color: var(--accent-glow);">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <div style="font-size:2.15rem; font-weight:800; color:var(--text-main); line-height:1;">$0.01 <span style="font-size:0.85rem; color:var(--text-muted);">/ req</span></div>
-            </div>
-            <div style="margin-top:0.5rem; font-size:0.7rem; color:var(--text-muted);">
-              Pay via x402 (${payNetworksLabel})
-            </div>
           </div>
 
-          <div class="card">
-            <div style="margin-bottom:0.5rem; font-size:0.75rem; color:var(--text-muted);">Payment network</div>
-            <div class="toggle-group" id="network-toggle">
-              ${supportedNetworks.map((n, i) => `<button class="toggle-opt${i === 0 ? " active" : ""}" id="net-${n}" onclick="setNetwork('${n}')"><iconify-icon icon="${networkIcon(n)}" style="vertical-align:middle; margin-right:4px;"></iconify-icon>${n.toUpperCase()}</button>`).join("\n              ")}
-            </div>
-          </div>
-
-          <div class="card">
-            <input type="text" class="sleek-input" id="in-passphrase" 
-                   placeholder="Optional: Passphrase to encrypt proof (leave empty for public)">
-             <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.25rem;">
-               If provided, the Arweave proof will be encrypted with AES-256-GCM. Share the passphrase with authorized parties.
-             </div>
-          </div>
-          </div><!-- /http-mode-panel -->
-
-          <!-- Flash VRF mode (on-chain packs) -->
           <div id="flash-mode-panel" style="display:none;">
-            <div class="card" style="border-color: var(--accent-glow);">
-              <span class="card-label" style="color:var(--accent);">Phala Flash VRF</span>
-              <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.5; margin:0.4rem 0 0;">
-                On-chain coordinator: request → TEE ECDSA fulfill → pack escrow settle.
-                Trust root = Phala TEE + registered pubkey (not Chainlink ECVRF). Gas paid on-chain — no x402.
-              </p>
-            </div>
-
             <div class="card">
-              <div style="margin-bottom:0.5rem; font-size:0.75rem; color:var(--text-muted);">Chain</div>
+              <div style="margin-bottom:0.4rem; font-size:0.7rem; color:var(--text-muted);">Chain</div>
               <div class="toggle-group" id="flash-chain-toggle"></div>
+              <div id="flash-status" style="font-size:0.72rem; color:var(--text-muted); line-height:1.55; margin-top:0.75rem;">—</div>
+              <button class="std-btn" style="width:100%; margin-top:0.6rem;" onclick="refreshFlashStatus()">Refresh</button>
             </div>
-
             <div class="card">
-              <span class="card-label">Coordinator status</span>
-              <div id="flash-status" style="font-size:0.75rem; color:var(--text-muted); line-height:1.7; margin-top:0.5rem;">
-                Select a chain and refresh.
-              </div>
-              <button class="std-btn" style="width:100%; margin-top:0.75rem;" onclick="refreshFlashStatus()">
-                <iconify-icon icon="ph:arrows-clockwise" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
-                Refresh status
+              <input type="number" class="sleek-input" id="flash-request-id" placeholder="requestId" min="0">
+              <button class="std-btn" style="width:100%; margin-top:0.5rem;" onclick="lookupFlashRequest()">Lookup</button>
+              <div id="flash-lookup-out" class="hash-display" style="margin-top:0.6rem; font-size:0.68rem; min-height:1.5rem;"></div>
+            </div>
+            <div class="card">
+              <input type="text" class="sleek-input" id="flash-seed" placeholder="Seed (optional)">
+              <button class="cyber-btn" id="flash-req-btn" onclick="requestFlashRandom()" style="margin-top:0.65rem;" disabled>
+                <iconify-icon icon="ph:lightning-fill"></iconify-icon> REQUEST
               </button>
+              <div id="flash-pack-links" style="font-size:0.7rem; color:var(--text-muted); line-height:1.55; margin-top:0.65rem;"></div>
             </div>
-
-            <div class="card">
-              <span class="card-label">Lookup request</span>
-              <input type="number" class="sleek-input" id="flash-request-id" placeholder="requestId (0, 1, 2…)" min="0">
-              <button class="std-btn" style="width:100%; margin-top:0.5rem;" onclick="lookupFlashRequest()">
-                getRequest / getRandom
-              </button>
-              <div id="flash-lookup-out" class="hash-display" style="margin-top:0.75rem; font-size:0.7rem; min-height:2.5rem;"></div>
-            </div>
-
-            <div class="card">
-              <span class="card-label">Request random (on-chain)</span>
-              <input type="text" class="sleek-input" id="flash-seed" placeholder="Seed (uint / hex) — optional">
-              <button class="cyber-btn" id="flash-req-btn" onclick="requestFlashRandom()" style="margin-top:0.75rem;" disabled>
-                <iconify-icon icon="ph:lightning-fill"></iconify-icon> REQUEST ON-CHAIN
-              </button>
-              <p style="font-size:0.7rem; color:var(--text-muted); margin-top:0.5rem;">
-                Requires EVM wallet on the selected chain with gas. Coordinator must be deployed.
-              </p>
-            </div>
-
-            <div class="card">
-              <span class="card-label">Pack contracts</span>
-              <div id="flash-pack-links" style="font-size:0.75rem; color:var(--text-muted); line-height:1.7;"></div>
-            </div>
-          </div><!-- /flash-mode-panel -->
+          </div>
         </div>
 
-        <!-- VERIFY -->
+        <!-- AUDIT -->
         <div id="v-verify" class="tab-view">
 ${renderTeeAttestationAuditCard(appId)}
-
           <div class="card">
-            <span class="card-label">System Identity</span>
-            <div class="hash-display" id="tee-app-id" style="margin-bottom: 1rem; font-size:0.7rem;">APP_ID: ${appId}</div>
-
-            <span class="card-label">Compose Hash (Code Fingerprint)</span>
-            <div class="hash-display" id="compose-hash" style="font-size:0.7rem;">${composeHash}</div>
-            <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem;">
-              Compare this hash with <a href="https://github.com/mysterygiftdotfun/verifiable-randomness-service" target="_blank" style="color:var(--accent);">our source code</a> to verify we're running the exact code you expect.
-            </p>
+            <span class="card-label">Identity</span>
+            <div class="hash-display" id="tee-app-id" style="font-size:0.68rem; margin-bottom:0.5rem;">APP ${appId}</div>
+            <div class="hash-display" id="compose-hash" style="font-size:0.68rem;">${composeHash}</div>
           </div>
-
-          <div class="card" style="margin-top:1rem; border-color:var(--accent-glow);">
-            <span class="card-label" style="color:var(--accent);">Independent Verification</span>
-            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.8rem;">
-              Don't trust us — verify the attestation yourself using third-party tools:
-            </p>
-
-            <a href="https://proof.t16z.com/" target="_blank" style="text-decoration:none; display:block; margin-bottom:0.5rem;">
-              <button class="std-btn" style="width:100%; background:rgba(255, 255, 255, 0.05); border-color:rgba(255, 255, 255, 0.2); color:#ffffff;">
-                <iconify-icon icon="ph:seal-check-fill" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
-                TEE Attestation Explorer
-              </button>
+          <div class="card">
+            <span class="card-label">Verify</span>
+            <a href="https://proof.t16z.com/" target="_blank" style="text-decoration:none; display:block; margin-bottom:0.4rem;">
+              <button class="std-btn" style="width:100%;">Attestation explorer</button>
             </a>
-
-            <a href="https://trust.phala.com/app/${encodeURIComponent(appId)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; display:block; margin-bottom:0.5rem;">
-              <button class="std-btn" style="width:100%;">
-                <iconify-icon icon="ph:shield-check-fill" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
-                Phala Trust Center Report
-              </button>
+            <a href="https://trust.phala.com/app/${encodeURIComponent(appId)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; display:block;">
+              <button class="std-btn" style="width:100%;">Phala Trust Center</button>
             </a>
-
           </div>
-
-          <div class="card" style="margin-top:1rem; border-color:rgba(255, 77, 0, 0.3);">
-            <span class="card-label" style="color:var(--accent);">
-              <iconify-icon icon="ph:archive-box-fill" style="vertical-align:text-bottom; margin-right:0.3rem;"></iconify-icon>
-              Arweave Verification (HTTP mode)
-            </span>
-            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.8rem; line-height:1.5;">
-              Each HTTP response includes a <code style="color:var(--accent);">commitment_hash</code> stored on Arweave. Verify by computing:
-            </p>
-            <div style="background:rgba(0,0,0,0.4); border:1px solid var(--panel-border); border-radius:8px; padding:0.75rem;">
-              <code style="font-size:0.75rem; color:var(--text-main);">SHA256(seed + request_hash) == commitment_hash</code>
+          <div class="card">
+            <span class="card-label">Checks</span>
+            <div style="font-size:0.72rem; color:var(--text-muted); line-height:1.55;">
+              <div><strong style="color:var(--text-main);">HTTP</strong> · <code>SHA256(seed‖request_hash)=commitment</code></div>
+              <div style="margin-top:0.45rem;"><strong style="color:var(--text-main);">Flash</strong> · <code>ecrecover(requestId,seed,random)</code></div>
             </div>
-          </div>
-
-          <div class="card" style="margin-top:1rem; border-color:var(--accent-glow);">
-            <span class="card-label" style="color:var(--accent);">Flash VRF verification (on-chain)</span>
-            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.6rem; line-height:1.5;">
-              Flash CVM may be a <strong style="color:var(--text-main);">separate</strong> Phala instance from this HTTP RNG node.
-              On-chain proof = ECDSA recovery of TEE signing key registered as <code>offchainPublicKey</code>.
-            </p>
-            <div style="background:rgba(0,0,0,0.4); border:1px solid var(--panel-border); border-radius:8px; padding:0.75rem; font-size:0.7rem; color:var(--text-main); line-height:1.5;">
-              eth_sign(keccak256(abi.encode(requestId, seed, random))) → ecrecover == offchainPublicKey
-            </div>
-            <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.6rem;">
-              Use EXECUTE → Flash VRF to read coordinator status and request lookups.
-            </p>
           </div>
         </div>
 
         <!-- INFO -->
         <div id="v-info" class="tab-view">
           <div class="card">
-            <span class="card-label">Overview</span>
-            <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5;">
-              Intel TDX powered verifiable randomness with two delivery modes:
-              <strong style="color:var(--text-main);">HTTP API</strong> (x402) and
-              <strong style="color:var(--text-main);">Phala Flash VRF</strong> (on-chain for packs).<br><br>
-              <span style="color:#FF9500;">EXPERIMENTAL SOFTWARE — Use at your own risk</span>
-            </p>
-          </div>
-
-          <div class="card" style="border-color: var(--accent-glow);">
-            <div style="font-size:1.1rem; font-weight:700; color:var(--text-main); margin-bottom:0.5rem;">Pricing</div>
-            <div style="font-size:0.85rem; color:var(--text-muted); line-height:1.7;">
-              <div><strong style="color:var(--text-main);">HTTP</strong> — $0.01 / req via x402 (${payNetworksLabel})</div>
-              <div><strong style="color:var(--text-main);">Flash</strong> — L2 gas only + operator CVM rent (no per-req x402)</div>
+            <span class="card-label">Service</span>
+            <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.65;">
+              <div>Intel TDX randomness · Phala Cloud</div>
+              <div>HTTP <strong style="color:var(--text-main);">$0.01</strong> x402 · Flash <strong style="color:var(--text-main);">gas</strong></div>
+              <div>HTTP → agents · Flash → pack opens</div>
+              <div style="margin-top:0.4rem; color:#FF9500;">Experimental</div>
             </div>
           </div>
-
           <div class="card">
-            <span class="card-label">When to use which</span>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.75rem;">
-              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">HTTP</strong><br>Miss tools, raffles, agents</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Flash</strong><br>PackEscrow open (Base / RH)</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">Dice / pick / shuffle</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">NFT &amp; equity packs</div>
-            </div>
-          </div>
-
-          <div class="card">
-            <span class="card-label">Service Info</span>
-            <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.7;">
-              <div>Arweave Proofs (HTTP): <strong style="color:var(--text-main);">${arweaveEnabled ? "Enabled" : "Disabled"}</strong></div>
-              <div>x402 Networks: <strong style="color:var(--text-main);">${supportedNetworks.join(", ")}</strong></div>
-              <div>Facilitator: <strong style="color:var(--text-main);">PayAI</strong></div>
-              <div>Public packs: <strong style="color:var(--text-main);">escrow contracts — not TEE vault</strong></div>
+            <span class="card-label">Status</span>
+            <div style="font-size:0.78rem; color:var(--text-muted); line-height:1.65;">
+              <div>Arweave: <strong style="color:var(--text-main);">${arweaveEnabled ? "on" : "off"}</strong></div>
+              <div>Pay nets: <strong style="color:var(--text-main);">${supportedNetworks.join(", ")}</strong></div>
+              <div>Canonical host: <strong style="color:var(--text-main);">rng.mysterygift.fun</strong></div>
             </div>
           </div>
         </div>
@@ -950,107 +835,58 @@ ${renderTeeAttestationAuditCard(appId)}
         <!-- GUIDE -->
         <div id="v-guide" class="tab-view">
           <div class="card">
-            <span class="card-label">HTTP API — Quick Start</span>
-            <div style="font-size:0.85rem; color:var(--text-muted); line-height:1.8;">
-              <div style="margin-bottom:0.6rem; display:flex; gap:10px;">
-                <span style="color:var(--accent); font-weight:700;">1.</span>
-                <span>Select mode <strong style="color:var(--text-main);">HTTP API / x402</strong></span>
-              </div>
-              <div style="margin-bottom:0.6rem; display:flex; gap:10px;">
-                <span style="color:var(--accent); font-weight:700;">2.</span>
-                <span>Connect wallet &amp; payment network</span>
-              </div>
-              <div style="display:flex; gap:10px;">
-                <span style="color:var(--accent); font-weight:700;">3.</span>
-                <span>Pay $0.01 via x402 &amp; get TEE seed / dice / pick</span>
-              </div>
+            <span class="card-label">HTTP</span>
+            <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.7;">
+              <div>1. Connect wallet (Reown)</div>
+              <div>2. Choose op + network</div>
+              <div>3. Run · pay $0.01 via x402</div>
             </div>
           </div>
-
           <div class="card">
-            <span class="card-label">Flash VRF — Quick Start</span>
-            <div style="font-size:0.85rem; color:var(--text-muted); line-height:1.8;">
-              <div style="margin-bottom:0.6rem; display:flex; gap:10px;">
-                <span style="color:var(--accent); font-weight:700;">1.</span>
-                <span>Select mode <strong style="color:var(--text-main);">On-chain Flash VRF</strong></span>
-              </div>
-              <div style="margin-bottom:0.6rem; display:flex; gap:10px;">
-                <span style="color:var(--accent); font-weight:700;">2.</span>
-                <span>Pick Base / RH chain; refresh coordinator status</span>
-              </div>
-              <div style="display:flex; gap:10px;">
-                <span style="color:var(--accent); font-weight:700;">3.</span>
-                <span>Request on-chain (gas) or lookup requestId; packs call this automatically on buy</span>
-              </div>
+            <span class="card-label">Flash</span>
+            <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.7;">
+              <div>1. Switch to Flash · pick chain</div>
+              <div>2. Refresh coordinator</div>
+              <div>3. Request or lookup requestId</div>
             </div>
           </div>
-
           <div class="card">
-            <span class="card-label">HTTP Operations</span>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.75rem;">
-              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Randomness</strong><br><span style="color:var(--text-muted);">256-bit seed</span></div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Number</strong><br><span style="color:var(--text-muted);">Integer in range</span></div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Dice</strong><br><span style="color:var(--text-muted);">Roll NdM</span></div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Pick</strong><br><span style="color:var(--text-muted);">Select one item</span></div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Shuffle</strong><br><span style="color:var(--text-muted);">Randomize list</span></div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">Winners</strong><br><span style="color:var(--text-muted);">Select N winners</span></div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;"><strong style="color:var(--text-main);">UUID</strong><br><span style="color:var(--text-muted);">Generate v4 UUID</span></div>
+            <span class="card-label">Notes</span>
+            <div style="font-size:0.75rem; color:var(--text-muted); line-height:1.55;">
+              x402 = pay-per-request headers · Verify in AUDIT · Packs use Flash escrows, not vaults
             </div>
-          </div>
-
-          <div class="card">
-            <span class="card-label">What is x402?</span>
-            <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5; margin:0;">
-              Pay-per-request via <a href="https://www.x402.org" target="_blank" style="color:var(--accent);">HTTP 402 headers</a> (HTTP mode only).
-            </p>
-          </div>
-
-          <div class="card">
-            <span class="card-label">Verification</span>
-            <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5;">
-              HTTP: TEE attestation + optional Arweave. Flash: on-chain ECDSA. Use <strong style="color:var(--text-main);">AUDIT</strong>.
-            </p>
           </div>
         </div>
 
         <!-- API -->
         <div id="v-api" class="tab-view">
           <div class="card">
-            <span class="card-label">HTTP POST Endpoints (x402)</span>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.75rem;">
-              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/randomness</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/number</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/dice</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/pick</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/shuffle</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/winners</div>
-              <div class="hash-display" style="padding:0.5rem; margin:0;">/v1/random/uuid</div>
+            <span class="card-label">HTTP · POST $0.01</span>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem; font-size:0.72rem;">
+              <div class="hash-display" style="padding:0.45rem; margin:0;">/v1/randomness</div>
+              <div class="hash-display" style="padding:0.45rem; margin:0;">/v1/random/number</div>
+              <div class="hash-display" style="padding:0.45rem; margin:0;">/v1/random/dice</div>
+              <div class="hash-display" style="padding:0.45rem; margin:0;">/v1/random/pick</div>
+              <div class="hash-display" style="padding:0.45rem; margin:0;">/v1/random/shuffle</div>
+              <div class="hash-display" style="padding:0.45rem; margin:0;">/v1/random/winners</div>
+              <div class="hash-display" style="padding:0.45rem; margin:0;">/v1/random/uuid</div>
+              <div class="hash-display" style="padding:0.45rem; margin:0;">GET /v1/health</div>
             </div>
           </div>
-
           <div class="card">
-            <span class="card-label">Flash VRF (Solidity)</span>
-            <div style="font-size:0.75rem; color:var(--text-muted); line-height:1.7;">
-              <div><code style="color:var(--text-main);">requestRandomNumber(uint256 seed)</code> → requestId</div>
-              <div><code style="color:var(--text-main);">onRandomGenerated(id, random, sig)</code> TEE fulfill</div>
-              <div><code style="color:var(--text-main);">getRandom(requestId)</code> → (random, fulfilled)</div>
-              <div style="margin-top:0.4rem;">Consumers: <code>PackEscrow721Flash</code> / <code>PackEscrow20Flash</code></div>
+            <span class="card-label">Flash · Solidity</span>
+            <div style="font-size:0.72rem; color:var(--text-muted); line-height:1.6;">
+              <div><code style="color:var(--text-main);">requestRandomNumber(seed)</code></div>
+              <div><code style="color:var(--text-main);">onRandomGenerated(id, random, sig)</code></div>
+              <div><code style="color:var(--text-main);">getRandom(id)</code></div>
             </div>
           </div>
-
           <div class="card">
-            <span class="card-label">Developer Resources</span>
-            <a href="https://github.com/mysterygiftdotfun/verifiable-randomness-service" target="_blank" style="text-decoration:none">
-              <button class="std-btn" style="margin-bottom:0.8rem;">
-                <iconify-icon icon="ph:github-logo-fill" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon> View Source Code
-              </button>
+            <a href="https://github.com/MysteryGiftDotFun/verifiable-randomness-service" target="_blank" style="text-decoration:none; display:block; margin-bottom:0.4rem;">
+              <button class="std-btn" style="width:100%;">Source</button>
             </a>
-
             <a href="${nodeUrl}" target="_blank" style="text-decoration:none; display:block;">
-              <button class="std-btn" style="background:rgba(52, 211, 153, 0.05); border-color:rgba(52, 211, 153, 0.2); color:var(--success);">
-                <iconify-icon icon="ph:activity-bold" style="vertical-align:text-bottom; margin-right:4px;"></iconify-icon>
-                View Node Status
-              </button>
+              <button class="std-btn" style="width:100%;">Node</button>
             </a>
           </div>
         </div>
@@ -1099,6 +935,7 @@ ${renderTeeAttestationAuditCard(appId)}
     };
     // Dual-mode: Phala Flash VRF coordinators (empty coordinator = not deployed)
     var FLASH_VRF_NETWORKS = ${flashVrfJson};
+    var REOWN_PROJECT_ID = ${JSON.stringify(reownProjectId || process.env.REOWN_PROJECT_ID || process.env.VITE_REOWN_PROJECT_ID || "")};
   </script>
   
   <!-- Inlined landing-client.js to avoid Cloudflare Access blocking -->
