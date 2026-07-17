@@ -625,6 +625,15 @@ const usageStats = {
   totalRevenueCents: 0,
 };
 
+/** Prefer Cloudflare connecting IP; never trust raw client XFF alone */
+function clientIpKey(req: Request): string {
+  const cf = req.get("cf-connecting-ip");
+  if (cf) return cf.trim();
+  // Behind our edge proxy: use Express req.ip (trust proxy on)
+  if (req.ip) return req.ip;
+  return req.socket?.remoteAddress || "unknown";
+}
+
 // Rate limiters
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
@@ -632,14 +641,7 @@ const globalLimiter = rateLimit({
   message: { error: "Too many requests, please slow down" },
   standardHeaders: true,
   legacyHeaders: false,
-  // Get real IP from X-Forwarded-For when behind proxy
-  keyGenerator: (req) => {
-    const forwarded = req.get("x-forwarded-for");
-    if (forwarded) {
-      return forwarded.split(",")[0].trim();
-    }
-    return req.ip || req.socket?.remoteAddress || "unknown";
-  },
+  keyGenerator: (req) => clientIpKey(req),
   validate: false, // Disable validation when trust proxy is enabled
 });
 
@@ -657,12 +659,7 @@ const paidLimiter = rateLimit({
         .digest("hex")
         .slice(0, 16);
     }
-    // Get real IP from X-Forwarded-For when behind proxy
-    const forwarded = req.get("x-forwarded-for");
-    if (forwarded) {
-      return forwarded.split(",")[0].trim();
-    }
-    return req.ip || req.socket?.remoteAddress || "unknown";
+    return clientIpKey(req);
   },
   message: { error: "Rate limit exceeded for paid requests" },
   validate: false, // Disable validation when trust proxy is enabled
@@ -671,52 +668,112 @@ const paidLimiter = rateLimit({
 // Apply global rate limiter to all /v1/ routes
 app.use("/v1/", globalLimiter);
 
+/**
+ * Internal service auth — raffle/Miss callers present a shared secret so they
+ * can skip public x402. Secret from RNG_INTERNAL_SECRET or TEE_RANDOMNESS_API_KEY.
+ */
+function verifyInternalSecret(req: Request): boolean {
+  const secret =
+    process.env.RNG_INTERNAL_SECRET || process.env.TEE_RANDOMNESS_API_KEY || "";
+  if (!secret) return false;
+
+  const fromHeader = req.get("x-internal-secret") || "";
+  const auth = req.get("authorization") || "";
+  const bearer = auth.toLowerCase().startsWith("bearer ")
+    ? auth.slice(7).trim()
+    : "";
+  const candidate = fromHeader || bearer;
+  if (!candidate || candidate.length !== secret.length) return false;
+
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(candidate, "utf8"),
+      Buffer.from(secret, "utf8"),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function paymentPayloadHash(req: Request): string | null {
+  const paymentHeader =
+    req.get("X-Payment") ||
+    req.get("PAYMENT-SIGNATURE") ||
+    req.get("payment-signature") ||
+    "";
+  if (!paymentHeader) return null;
+  return crypto.createHash("sha256").update(paymentHeader).digest("hex");
+}
+
+/** Replay protection for paid payloads; no-op for internal-auth requests */
+async function assertPaymentNotReplayed(
+  req: Request,
+  res: Response,
+): Promise<boolean> {
+  if ((req as any).internalService) return true;
+  const h = paymentPayloadHash(req);
+  if (!h) return true;
+  if (await hasPayloadHash(h)) {
+    res.status(409).json({ error: "Payment payload already used" });
+    return false;
+  }
+  await addPayloadHash(h);
+  return true;
+}
+
 // x402 Payment Middleware using official @x402/express
 // This handles 402 responses, payment verification, and settlement automatically
 const x402RouteAccepts = buildX402Accepts("$0.01");
 
-app.use(
-  paymentMiddleware(
-    {
-      "POST /v1/randomness": {
-        accepts: x402RouteAccepts,
-        description: "TEE Randomness Request",
-        mimeType: "application/json",
-      },
-      "POST /v1/random/number": {
-        accepts: x402RouteAccepts,
-        description: "Random Number Generation",
-        mimeType: "application/json",
-      },
-      "POST /v1/random/pick": {
-        accepts: x402RouteAccepts,
-        description: "Random Pick from List",
-        mimeType: "application/json",
-      },
-      "POST /v1/random/shuffle": {
-        accepts: x402RouteAccepts,
-        description: "Random List Shuffle",
-        mimeType: "application/json",
-      },
-      "POST /v1/random/winners": {
-        accepts: x402RouteAccepts,
-        description: "Random Winner Selection",
-        mimeType: "application/json",
-      },
-      "POST /v1/random/uuid": {
-        accepts: x402RouteAccepts,
-        description: "UUIDv4 Generation",
-        mimeType: "application/json",
-      },
-      "POST /v1/random/dice": {
-        accepts: x402RouteAccepts,
-        description: "Dice Roll",
-        mimeType: "application/json",
-      },
+const x402Pay = paymentMiddleware(
+  {
+    "POST /v1/randomness": {
+      accepts: x402RouteAccepts,
+      description: "TEE Randomness Request",
+      mimeType: "application/json",
     },
-    x402Server,
-  ),
+    "POST /v1/random/number": {
+      accepts: x402RouteAccepts,
+      description: "Random Number Generation",
+      mimeType: "application/json",
+    },
+    "POST /v1/random/pick": {
+      accepts: x402RouteAccepts,
+      description: "Random Pick from List",
+      mimeType: "application/json",
+    },
+    "POST /v1/random/shuffle": {
+      accepts: x402RouteAccepts,
+      description: "Random List Shuffle",
+      mimeType: "application/json",
+    },
+    "POST /v1/random/winners": {
+      accepts: x402RouteAccepts,
+      description: "Random Winner Selection",
+      mimeType: "application/json",
+    },
+    "POST /v1/random/uuid": {
+      accepts: x402RouteAccepts,
+      description: "UUIDv4 Generation",
+      mimeType: "application/json",
+    },
+    "POST /v1/random/dice": {
+      accepts: x402RouteAccepts,
+      description: "Dice Roll",
+      mimeType: "application/json",
+    },
+  },
+  x402Server,
 );
+
+// Internal secret bypasses x402; everyone else pays
+app.use((req, res, next) => {
+  if (verifyInternalSecret(req)) {
+    (req as any).internalService = true;
+    return next();
+  }
+  return x402Pay(req, res, next);
+});
 
 /**
  * POST /v1/randomness
@@ -724,6 +781,8 @@ app.use(
  */
 app.post("/v1/randomness", paidLimiter, async (req: Request, res: Response) => {
   try {
+    if (!(await assertPaymentNotReplayed(req, res))) return;
+
     const { request_hash, metadata, passphrase } = req.body;
 
     usageStats.totalRequests++;
@@ -798,6 +857,7 @@ app.post(
   paidLimiter,
   async (req: Request, res: Response) => {
     try {
+      if (!(await assertPaymentNotReplayed(req, res))) return;
       const { min = 1, max, request_hash, passphrase } = req.body;
 
       if (typeof max !== "number" || max < 1) {
@@ -868,6 +928,7 @@ app.post(
   paidLimiter,
   async (req: Request, res: Response) => {
     try {
+      if (!(await assertPaymentNotReplayed(req, res))) return;
       const { items, request_hash, passphrase } = req.body;
 
       if (!Array.isArray(items) || items.length === 0) {
@@ -938,6 +999,7 @@ app.post(
   paidLimiter,
   async (req: Request, res: Response) => {
     try {
+      if (!(await assertPaymentNotReplayed(req, res))) return;
       const { items, request_hash, passphrase } = req.body;
 
       if (!Array.isArray(items) || items.length === 0) {
@@ -1014,6 +1076,7 @@ app.post(
   paidLimiter,
   async (req: Request, res: Response) => {
     try {
+      if (!(await assertPaymentNotReplayed(req, res))) return;
       const { items, count = 1, request_hash, passphrase } = req.body;
 
       if (!Array.isArray(items) || items.length === 0) {
@@ -1113,6 +1176,7 @@ app.post(
   paidLimiter,
   async (req: Request, res: Response) => {
     try {
+      if (!(await assertPaymentNotReplayed(req, res))) return;
       const { request_hash, passphrase } = req.body;
 
       usageStats.totalRequests++;
@@ -1177,6 +1241,7 @@ app.post(
   paidLimiter,
   async (req: Request, res: Response) => {
     try {
+      if (!(await assertPaymentNotReplayed(req, res))) return;
       const { dice, request_hash, passphrase } = req.body;
 
       if (typeof dice !== "string") {
