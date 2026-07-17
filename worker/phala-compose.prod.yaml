@@ -1,6 +1,6 @@
 services:
   randomness-prod:
-    image: ghcr.io/thomasjvu/vrf-service:0.1.8-BETA.6
+    image: ghcr.io/thomasjvu/vrf-service:0.1.8-BETA.7
     ports:
       - "3000:3000"
     environment:
@@ -8,7 +8,7 @@ services:
       - NODE_ENV=production
       - APP_ENVIRONMENT=production
       - ENVIRONMENT=production
-      - APP_VERSION=\${APP_VERSION:-0.1.8-BETA.6}
+      - APP_VERSION=\${APP_VERSION:-0.1.8-BETA.7}
       - PAYMENT_WALLET=${PAYMENT_WALLET:?PAYMENT_WALLET is required}
       - PAYMENT_WALLET_BASE=${PAYMENT_WALLET_BASE:-}
       - HELIUS_RPC_URL=${HELIUS_RPC_URL:?HELIUS_RPC_URL is required}
@@ -21,6 +21,8 @@ services:
       - REDIS_URL=${REDIS_URL:-}
       - REOWN_PROJECT_ID=${REOWN_PROJECT_ID:-}
       - VITE_REOWN_PROJECT_ID=${VITE_REOWN_PROJECT_ID:-}
+      - TEE_RANDOMNESS_API_KEY=${TEE_RANDOMNESS_API_KEY:-}
+      - RNG_INTERNAL_SECRET=${RNG_INTERNAL_SECRET:-${TEE_RANDOMNESS_API_KEY:-}}
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
     restart: always
