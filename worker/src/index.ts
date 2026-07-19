@@ -558,17 +558,37 @@ async function hasPayloadHash(hash: string): Promise<boolean> {
   return usedPayloadHashes.has(hash);
 }
 
-async function addPayloadHash(hash: string): Promise<void> {
+/**
+ * Atomically claim a payment payload hash for one-time use.
+ * Redis: SET replay:{hash} 1 NX — true only if we created the key.
+ * LRU: has-then-set within a single process (no races across event loop ticks
+ * for the check+set pair since JS is single-threaded).
+ */
+async function tryClaimPayloadHash(hash: string): Promise<boolean> {
   if (redisAvailable && redis) {
     try {
-      // Permanent storage — no expiry, survives restarts
-      await redis.set(`replay:${hash}`, "1");
+      // Permanent storage — no expiry, survives restarts; NX prevents races
+      const result = await redis.set(`replay:${hash}`, "1", "NX");
+      if (result === "OK") {
+        usedPayloadHashes.set(hash, true);
+        return true;
+      }
+      // null → key already exists
+      return false;
     } catch {
       // Redis failed, fall through to LRU
     }
   }
-  // Always write to LRU as backup
+  if (usedPayloadHashes.has(hash)) {
+    return false;
+  }
   usedPayloadHashes.set(hash, true);
+  return true;
+}
+
+async function addPayloadHash(hash: string): Promise<void> {
+  // Prefer atomic claim; keep non-atomic set for callers that only need write
+  await tryClaimPayloadHash(hash);
 }
 
 async function removePayloadHash(hash: string): Promise<void> {
@@ -705,20 +725,34 @@ function paymentPayloadHash(req: Request): string | null {
   return crypto.createHash("sha256").update(paymentHeader).digest("hex");
 }
 
-/** Replay protection for paid payloads; no-op for internal-auth requests */
+/**
+ * Replay protection for paid payloads; no-op for internal-auth requests.
+ * Claims the hash atomically (SET NX / LRU). On handler 5xx, call
+ * rollbackClaimedPayment so the client can retry with the same payload.
+ */
 async function assertPaymentNotReplayed(
   req: Request,
   res: Response,
 ): Promise<boolean> {
+  // Internal service auth skips public x402 and payment replay entirely
   if ((req as any).internalService) return true;
   const h = paymentPayloadHash(req);
   if (!h) return true;
-  if (await hasPayloadHash(h)) {
+  const claimed = await tryClaimPayloadHash(h);
+  if (!claimed) {
     res.status(409).json({ error: "Payment payload already used" });
     return false;
   }
-  await addPayloadHash(h);
+  (req as any).claimedPaymentHash = h;
   return true;
+}
+
+/** Roll back a claimed payment hash after handler failure (5xx) so retry works */
+async function rollbackClaimedPayment(req: Request): Promise<void> {
+  const h = (req as any).claimedPaymentHash as string | undefined;
+  if (!h) return;
+  await removePayloadHash(h);
+  delete (req as any).claimedPaymentHash;
 }
 
 // x402 Payment Middleware using official @x402/express
@@ -843,6 +877,7 @@ app.post("/v1/randomness", paidLimiter, async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("[TEE] Error generating randomness:", error);
+    await rollbackClaimedPayment(req);
     res.status(500).json({ error: "Internal TEE Error" });
   }
 });
@@ -913,6 +948,7 @@ app.post(
       });
     } catch (error) {
       console.error("[TEE] Error generating random number:", error);
+      await rollbackClaimedPayment(req);
       res.status(500).json({ error: "Internal TEE Error" });
     }
   },
@@ -984,6 +1020,7 @@ app.post(
       });
     } catch (error) {
       console.error("[TEE] Error picking random item:", error);
+      await rollbackClaimedPayment(req);
       res.status(500).json({ error: "Internal TEE Error" });
     }
   },
@@ -1061,6 +1098,7 @@ app.post(
       });
     } catch (error) {
       console.error("[TEE] Error shuffling items:", error);
+      await rollbackClaimedPayment(req);
       res.status(500).json({ error: "Internal TEE Error" });
     }
   },
@@ -1161,6 +1199,7 @@ app.post(
       });
     } catch (error) {
       console.error("[TEE] Error selecting winners:", error);
+      await rollbackClaimedPayment(req);
       res.status(500).json({ error: "Internal TEE Error" });
     }
   },
@@ -1226,6 +1265,7 @@ app.post(
       });
     } catch (error) {
       console.error("[TEE] Error generating UUID:", error);
+      await rollbackClaimedPayment(req);
       res.status(500).json({ error: "Internal TEE Error" });
     }
   },
@@ -1322,6 +1362,7 @@ app.post(
       });
     } catch (error) {
       console.error("[TEE] Error rolling dice:", error);
+      await rollbackClaimedPayment(req);
       res.status(500).json({ error: "Internal TEE Error" });
     }
   },
