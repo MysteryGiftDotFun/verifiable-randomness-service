@@ -34,6 +34,7 @@ import { ExactSvmScheme } from "@x402/svm/exact/server";
 import { facilitator } from "@payai/facilitator";
 
 import { renderLandingPage } from "./landing.js";
+import { productionRequiresRedisReplay } from "./replay-policy.js";
 
 const app = express();
 app.set("trust proxy", true);
@@ -538,7 +539,25 @@ function initRedis(): void {
 
 initRedis();
 
-// In-memory LRU fallback when Redis is unavailable
+function redisReadyForReplay(): boolean {
+  return Boolean(redisAvailable && redis);
+}
+
+function replayBackendUnavailableError(): Error {
+  return Object.assign(new Error("replay_backend_unavailable"), {
+    code: "REPLAY_BACKEND_UNAVAILABLE",
+  });
+}
+
+function isReplayBackendUnavailable(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: string }).code === "REPLAY_BACKEND_UNAVAILABLE"
+  );
+}
+
+// In-memory LRU fallback when Redis is unavailable (non-production only)
 const usedPayloadHashes = new LRUCache<string, boolean>({
   max: 10000,
   ttl: 3600000, // 1 hour TTL
@@ -547,12 +566,18 @@ const usedPayloadHashes = new LRUCache<string, boolean>({
 
 // Replay protection helpers
 async function hasPayloadHash(hash: string): Promise<boolean> {
-  if (redisAvailable && redis) {
+  if (productionRequiresRedisReplay() && !redisReadyForReplay()) {
+    throw replayBackendUnavailableError();
+  }
+  if (redisReadyForReplay()) {
     try {
-      const exists = await redis.exists(`replay:${hash}`);
+      const exists = await redis!.exists(`replay:${hash}`);
       return exists === 1;
     } catch {
-      // Redis failed, fall through to LRU
+      if (productionRequiresRedisReplay()) {
+        throw replayBackendUnavailableError();
+      }
+      // Non-production: fall through to LRU
     }
   }
   return usedPayloadHashes.has(hash);
@@ -563,12 +588,17 @@ async function hasPayloadHash(hash: string): Promise<boolean> {
  * Redis: SET replay:{hash} 1 NX — true only if we created the key.
  * LRU: has-then-set within a single process (no races across event loop ticks
  * for the check+set pair since JS is single-threaded).
+ * Production fails closed when Redis is unavailable (no LRU fallthrough).
  */
 async function tryClaimPayloadHash(hash: string): Promise<boolean> {
-  if (redisAvailable && redis) {
+  if (productionRequiresRedisReplay() && !redisReadyForReplay()) {
+    throw replayBackendUnavailableError();
+  }
+
+  if (redisReadyForReplay()) {
     try {
       // Permanent storage — no expiry, survives restarts; NX prevents races
-      const result = await redis.set(`replay:${hash}`, "1", "NX");
+      const result = await redis!.set(`replay:${hash}`, "1", "NX");
       if (result === "OK") {
         usedPayloadHashes.set(hash, true);
         return true;
@@ -576,7 +606,10 @@ async function tryClaimPayloadHash(hash: string): Promise<boolean> {
       // null → key already exists
       return false;
     } catch {
-      // Redis failed, fall through to LRU
+      // Redis failed mid-op: production fail closed; otherwise fall through to LRU
+      if (productionRequiresRedisReplay()) {
+        throw replayBackendUnavailableError();
+      }
     }
   }
   if (usedPayloadHashes.has(hash)) {
@@ -738,13 +771,21 @@ async function assertPaymentNotReplayed(
   if ((req as any).internalService) return true;
   const h = paymentPayloadHash(req);
   if (!h) return true;
-  const claimed = await tryClaimPayloadHash(h);
-  if (!claimed) {
-    res.status(409).json({ error: "Payment payload already used" });
-    return false;
+  try {
+    const claimed = await tryClaimPayloadHash(h);
+    if (!claimed) {
+      res.status(409).json({ error: "Payment payload already used" });
+      return false;
+    }
+    (req as any).claimedPaymentHash = h;
+    return true;
+  } catch (error) {
+    if (isReplayBackendUnavailable(error)) {
+      res.status(503).json({ error: "replay_backend_unavailable" });
+      return false;
+    }
+    throw error;
   }
-  (req as any).claimedPaymentHash = h;
-  return true;
 }
 
 /** Roll back a claimed payment hash after handler failure (5xx) so retry works */
