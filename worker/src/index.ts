@@ -679,13 +679,39 @@ const usageStats = {
   totalRevenueCents: 0,
 };
 
-/** Prefer Cloudflare connecting IP; never trust raw client XFF alone */
+/**
+ * Client IP for rate limiting on TEE origins.
+ * Trust CF / XFF only when TRUST_PROXY=true; otherwise use socket remote.
+ * Do not use Express req.ip when TRUST_PROXY is false — with `trust proxy`
+ * enabled, req.ip follows spoofable XFF on direct CVM hits.
+ */
+function originClientIp(args: {
+  cfConnectingIp?: string;
+  xForwardedFor?: string;
+  socketRemote?: string;
+  trustProxy: boolean;
+}): string {
+  if (args.trustProxy) {
+    const cf = args.cfConnectingIp?.trim();
+    if (cf) return cf;
+    const xff = args.xForwardedFor?.split(",")[0]?.trim();
+    if (xff) return xff;
+  }
+  const sock = (args.socketRemote || "").replace(/^::ffff:/, "").trim();
+  return sock || "unknown";
+}
+
+function trustProxyEnabled(): boolean {
+  return (process.env.TRUST_PROXY || "").toLowerCase() === "true";
+}
+
 function clientIpKey(req: Request): string {
-  const cf = req.get("cf-connecting-ip");
-  if (cf) return cf.trim();
-  // Behind our edge proxy: use Express req.ip (trust proxy on)
-  if (req.ip) return req.ip;
-  return req.socket?.remoteAddress || "unknown";
+  return originClientIp({
+    cfConnectingIp: req.get("cf-connecting-ip") ?? undefined,
+    xForwardedFor: req.get("x-forwarded-for") ?? undefined,
+    socketRemote: req.socket?.remoteAddress,
+    trustProxy: trustProxyEnabled(),
+  });
 }
 
 // Rate limiters
