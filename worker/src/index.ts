@@ -35,6 +35,7 @@ import { facilitator } from "@payai/facilitator";
 
 import { renderLandingPage } from "./landing.js";
 import { productionRequiresRedisReplay } from "./replay-policy.js";
+import { shouldRollbackClaimOnStatus } from "./payment-rollback.js";
 
 const app = express();
 app.set("trust proxy", true);
@@ -760,8 +761,9 @@ function paymentPayloadHash(req: Request): string | null {
 
 /**
  * Replay protection for paid payloads; no-op for internal-auth requests.
- * Claims the hash atomically (SET NX / LRU). On handler 5xx, call
- * rollbackClaimedPayment so the client can retry with the same payload.
+ * Claims the hash atomically (SET NX / LRU). On handler 400/5xx after a
+ * successful claim, call rollbackClaimedPayment so the client can retry
+ * with the same payload. Do not rollback 409 (already used).
  */
 async function assertPaymentNotReplayed(
   req: Request,
@@ -788,12 +790,24 @@ async function assertPaymentNotReplayed(
   }
 }
 
-/** Roll back a claimed payment hash after handler failure (5xx) so retry works */
+/** Roll back a claimed payment hash after handler failure (400/5xx) so retry works */
 async function rollbackClaimedPayment(req: Request): Promise<void> {
   const h = (req as any).claimedPaymentHash as string | undefined;
   if (!h) return;
   await removePayloadHash(h);
   delete (req as any).claimedPaymentHash;
+}
+
+/** After a successful claim, 400 must roll back so the same payload can retry. */
+async function rejectPaid400(
+  req: Request,
+  res: Response,
+  body: object,
+): Promise<void> {
+  if (shouldRollbackClaimOnStatus(400)) {
+    await rollbackClaimedPayment(req);
+  }
+  res.status(400).json(body);
 }
 
 // x402 Payment Middleware using official @x402/express
@@ -937,14 +951,14 @@ app.post(
       const { min = 1, max, request_hash, passphrase } = req.body;
 
       if (typeof max !== "number" || max < 1) {
-        res
-          .status(400)
-          .json({ error: "max is required and must be a positive number" });
+        await rejectPaid400(req, res, {
+          error: "max is required and must be a positive number",
+        });
         return;
       }
 
       if (min >= max) {
-        res.status(400).json({ error: "min must be less than max" });
+        await rejectPaid400(req, res, { error: "min must be less than max" });
         return;
       }
 
@@ -1009,14 +1023,16 @@ app.post(
       const { items, request_hash, passphrase } = req.body;
 
       if (!Array.isArray(items) || items.length === 0) {
-        res.status(400).json({ error: "items must be a non-empty array" });
+        await rejectPaid400(req, res, {
+          error: "items must be a non-empty array",
+        });
         return;
       }
 
       if (items.length > 100000) {
-        res
-          .status(400)
-          .json({ error: "items array cannot exceed 100,000 elements" });
+        await rejectPaid400(req, res, {
+          error: "items array cannot exceed 100,000 elements",
+        });
         return;
       }
 
@@ -1081,12 +1097,14 @@ app.post(
       const { items, request_hash, passphrase } = req.body;
 
       if (!Array.isArray(items) || items.length === 0) {
-        res.status(400).json({ error: "items must be a non-empty array" });
+        await rejectPaid400(req, res, {
+          error: "items must be a non-empty array",
+        });
         return;
       }
 
       if (items.length > 1000) {
-        res.status(400).json({
+        await rejectPaid400(req, res, {
           error: "items array cannot exceed 1,000 elements for shuffle",
         });
         return;
@@ -1159,26 +1177,30 @@ app.post(
       const { items, count = 1, request_hash, passphrase } = req.body;
 
       if (!Array.isArray(items) || items.length === 0) {
-        res.status(400).json({ error: "items must be a non-empty array" });
+        await rejectPaid400(req, res, {
+          error: "items must be a non-empty array",
+        });
         return;
       }
 
       if (typeof count !== "number" || count < 1) {
-        res.status(400).json({ error: "count must be a positive number" });
+        await rejectPaid400(req, res, {
+          error: "count must be a positive number",
+        });
         return;
       }
 
       if (count > items.length) {
-        res
-          .status(400)
-          .json({ error: "count cannot exceed the number of items" });
+        await rejectPaid400(req, res, {
+          error: "count cannot exceed the number of items",
+        });
         return;
       }
 
       if (items.length > 100000) {
-        res
-          .status(400)
-          .json({ error: "items array cannot exceed 100,000 elements" });
+        await rejectPaid400(req, res, {
+          error: "items array cannot exceed 100,000 elements",
+        });
         return;
       }
 
@@ -1326,15 +1348,15 @@ app.post(
       const { dice, request_hash, passphrase } = req.body;
 
       if (typeof dice !== "string") {
-        res
-          .status(400)
-          .json({ error: 'dice must be a string (e.g., "2d6", "1d20")' });
+        await rejectPaid400(req, res, {
+          error: 'dice must be a string (e.g., "2d6", "1d20")',
+        });
         return;
       }
 
       const match = dice.toLowerCase().match(/^(\d+)d(\d+)$/);
       if (!match) {
-        res.status(400).json({
+        await rejectPaid400(req, res, {
           error: 'Invalid dice format. Use "NdM" (e.g., "2d6", "1d20")',
         });
         return;
@@ -1344,16 +1366,16 @@ app.post(
       const sides = parseInt(match[2], 10);
 
       if (numDice < 1 || numDice > 100) {
-        res
-          .status(400)
-          .json({ error: "Number of dice must be between 1 and 100" });
+        await rejectPaid400(req, res, {
+          error: "Number of dice must be between 1 and 100",
+        });
         return;
       }
 
       if (sides < 2 || sides > 1000) {
-        res
-          .status(400)
-          .json({ error: "Dice sides must be between 2 and 1000" });
+        await rejectPaid400(req, res, {
+          error: "Dice sides must be between 2 and 1000",
+        });
         return;
       }
 
