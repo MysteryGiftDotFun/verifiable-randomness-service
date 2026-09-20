@@ -1,0 +1,10 @@
+# Mystery Gift TEE Randomness
+> Hardware-backed verifiable randomness (Intel TDX / Phala). Pay-per-request via x402, or a developer API key (see connector brief).
+
+- Home: https://rng.mysterygift.fun
+- Health: https://rng.mysterygift.fun/v1/health
+- OpenAPI: https://rng.mysterygift.fun/openapi.yaml
+- Connector brief (Muse / any agent): https://rng.mysterygift.fun/connectors/muse.md
+- Terms: https://rng.mysterygift.fun/terms
+- Privacy: https://rng.mysterygift.fun/privacy
+- Attestation: https://rng.mysterygift.fun/v1/attestation

@@ -1487,6 +1487,31 @@ app.get("/v1/health", (_req: Request, res: Response) => {
   });
 });
 
+const STATIC_DIR = path.join(__dirname, "..", "static");
+
+function sendStaticFile(res: Response, relative: string, type: string): void {
+  const full = path.resolve(STATIC_DIR, relative);
+  if (!full.startsWith(path.resolve(STATIC_DIR))) {
+    res.status(400).json({ error: "invalid path" });
+    return;
+  }
+  if (!fs.existsSync(full)) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+  res.type(type).send(fs.readFileSync(full, "utf8"));
+}
+
+app.get("/llms.txt", (_req: Request, res: Response) => {
+  sendStaticFile(res, "llms.txt", "text/plain");
+});
+app.get("/openapi.yaml", (_req: Request, res: Response) => {
+  sendStaticFile(res, "openapi.yaml", "text/yaml");
+});
+app.get("/connectors/muse.md", (_req: Request, res: Response) => {
+  sendStaticFile(res, "connectors/muse.md", "text/markdown");
+});
+
 /**
  * GET / - Landing page
  */

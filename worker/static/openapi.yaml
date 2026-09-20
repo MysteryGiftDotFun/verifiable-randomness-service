@@ -1,0 +1,166 @@
+openapi: 3.1.0
+info:
+  title: Mystery Gift TEE Randomness
+  version: 0.1.8
+  description: Hardware-backed verifiable randomness (Intel TDX / Phala). Paid POSTs require x402 $0.01 or a developer API key (Bearer mgk_).
+servers:
+  - url: https://rng.mysterygift.fun
+paths:
+  /v1/health:
+    get:
+      summary: Service health
+      responses:
+        "200":
+          description: OK
+  /v1/attestation:
+    get:
+      summary: Fresh TEE quote
+      responses:
+        "200":
+          description: Quote payload
+  /v1/attestation/status:
+    get:
+      summary: Server-side attestation status
+      responses:
+        "200":
+          description: Status payload
+  /v1/verify:
+    post:
+      summary: Verify an attestation quote
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                attestation:
+                  type: string
+                quote_hex:
+                  type: string
+                expected_report_data_hex:
+                  type: string
+      responses:
+        "200":
+          description: Verification result
+  /v1/randomness:
+    post:
+      summary: Raw 256-bit seed
+      description: Requires x402 $0.01 or a developer API key (Bearer mgk_).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                request_hash:
+                  type: string
+                metadata: {}
+                passphrase:
+                  type: string
+      responses:
+        "200":
+          description: Seed plus attestation
+        "402":
+          description: Payment required
+  /v1/random/number:
+    post:
+      summary: Random integer in range
+      description: Requires x402 $0.01 or a developer API key (Bearer mgk_).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [max]
+              properties:
+                min:
+                  type: number
+                max:
+                  type: number
+                request_hash:
+                  type: string
+                passphrase:
+                  type: string
+      responses:
+        "200":
+          description: Number plus attestation
+        "402":
+          description: Payment required
+  /v1/random/pick:
+    post:
+      summary: Pick one item
+      description: Requires x402 $0.01 or a developer API key (Bearer mgk_).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  maxItems: 100000
+                request_hash:
+                  type: string
+                passphrase:
+                  type: string
+      responses:
+        "200":
+          description: Picked item plus attestation
+        "402":
+          description: Payment required
+  /v1/random/shuffle:
+    post:
+      summary: Shuffle a list
+      description: Requires x402 $0.01 or a developer API key (Bearer mgk_). Max 1000 items.
+  /v1/random/winners:
+    post:
+      summary: Pick unique winners
+      description: Requires x402 $0.01 or a developer API key (Bearer mgk_).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                count:
+                  type: number
+                request_hash:
+                  type: string
+                passphrase:
+                  type: string
+  /v1/random/uuid:
+    post:
+      summary: UUIDv4
+      description: Requires x402 $0.01 or a developer API key (Bearer mgk_).
+  /v1/random/dice:
+    post:
+      summary: Dice roll (NdM)
+      description: Requires x402 $0.01 or a developer API key (Bearer mgk_).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dice]
+              properties:
+                dice:
+                  type: string
+                request_hash:
+                  type: string
+                passphrase:
+                  type: string
+  /llms.txt:
+    get:
+      summary: Agent index
+  /connectors/muse.md:
+    get:
+      summary: Muse / agent connector brief
+  /openapi.yaml:
+    get:
+      summary: This OpenAPI document
