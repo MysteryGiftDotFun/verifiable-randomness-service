@@ -34,7 +34,11 @@ import { ExactSvmScheme } from "@x402/svm/exact/server";
 import { facilitator } from "@payai/facilitator";
 
 import { renderLandingPage } from "./landing.js";
-import { productionRequiresRedisReplay } from "./replay-policy.js";
+import {
+  isProductionEnvironment,
+  paidRngBlockReason,
+  productionRequiresRedisReplay,
+} from "./replay-policy.js";
 import { shouldRollbackClaimOnStatus } from "./payment-rollback.js";
 
 const app = express();
@@ -46,7 +50,7 @@ app.use(express.json({ limit: "8mb" }));
 app.use(
   cors({
     origin:
-      process.env.NODE_ENV === "production"
+      isProductionEnvironment()
         ? [
             "https://mysterygift.fun",
             "https://rng.mysterygift.fun",
@@ -76,10 +80,8 @@ const PRICE_PER_REQUEST_CENTS = 1; // $0.01 per attestation
 
 const PAYMENT_WALLET = (() => {
   const wallet = process.env.PAYMENT_WALLET;
-  const environment =
-    process.env.ENVIRONMENT || process.env.NODE_ENV || "development";
   if (!wallet) {
-    if (environment === "production") {
+    if (isProductionEnvironment()) {
       throw new Error("CRITICAL: PAYMENT_WALLET must be set in production");
     }
     console.warn("[Config] PAYMENT_WALLET not set, using default dev wallet");
@@ -110,6 +112,8 @@ const CAIP_BASE_MAINNET = "eip155:8453";
 const CAIP_BASE_SEPOLIA = "eip155:84532";
 const CAIP_ROBINHOOD_MAINNET = "eip155:4663";
 const CAIP_ROBINHOOD_TESTNET = "eip155:46630";
+const X402_EVM_PAYMENT_TIMEOUT_SECONDS = 60 * 60;
+const X402_SVM_PAYMENT_TIMEOUT_SECONDS = 60;
 
 function buildX402Accepts(price: string = "$0.01") {
   // network must be CAIP-2 (`namespace:reference`) for @x402 PaymentOption typing
@@ -119,18 +123,21 @@ function buildX402Accepts(price: string = "$0.01") {
     network: `${string}:${string}`;
     payTo: string;
     asset?: string;
+    maxTimeoutSeconds: number;
   }> = [
     {
       scheme: "exact",
       price,
       network: CAIP_SOLANA_MAINNET,
       payTo: PAYMENT_WALLET,
+      maxTimeoutSeconds: X402_SVM_PAYMENT_TIMEOUT_SECONDS,
     },
     {
       scheme: "exact",
       price,
       network: CAIP_BASE_MAINNET,
       payTo: PAYMENT_WALLET_BASE,
+      maxTimeoutSeconds: X402_EVM_PAYMENT_TIMEOUT_SECONDS,
     },
   ];
   if (ROBINHOOD_PAYMENTS_ENABLED) {
@@ -140,6 +147,7 @@ function buildX402Accepts(price: string = "$0.01") {
       network: CAIP_ROBINHOOD_MAINNET,
       payTo: PAYMENT_WALLET_ROBINHOOD,
       asset: USDG_ROBINHOOD,
+      maxTimeoutSeconds: X402_EVM_PAYMENT_TIMEOUT_SECONDS,
     });
   }
   return accepts;
@@ -405,7 +413,7 @@ async function getCommitmentKeypair(): Promise<Keypair | null> {
     );
     return commitmentKeypair;
   } catch (e) {
-    if (process.env.NODE_ENV === "production") {
+    if (isProductionEnvironment()) {
       console.error(
         "[TEE] Failed to derive commitment keypair in production:",
         e,
@@ -494,7 +502,9 @@ function initRedis(): void {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
     console.warn(
-      "[TEE] REDIS_URL not set, using in-memory LRU cache (replay protection resets on restart)",
+      productionRequiresRedisReplay()
+        ? "[TEE] REDIS_URL not set; public paid RNG requests are unavailable in production"
+        : "[TEE] REDIS_URL not set, using in-memory LRU cache (replay protection resets on restart)",
     );
     return;
   }
@@ -509,14 +519,19 @@ function initRedis(): void {
   });
 
   redis.on("connect", () => {
+    redisAvailable = false;
+    console.log("[TEE] Redis connected; waiting for readiness");
+  });
+
+  redis.on("ready", () => {
     redisAvailable = true;
-    console.log("[TEE] Redis connected — replay protection is persistent");
+    console.log("[TEE] Redis ready — replay protection is persistent");
   });
 
   redis.on("error", (err) => {
     if (redisAvailable) {
       console.error(
-        "[TEE] Redis error, falling back to in-memory LRU:",
+        "[TEE] Redis error; persistent replay protection is unavailable:",
         err.message,
       );
     }
@@ -526,13 +541,13 @@ function initRedis(): void {
   redis.on("close", () => {
     redisAvailable = false;
     console.warn(
-      "[TEE] Redis connection closed, falling back to in-memory LRU",
+      "[TEE] Redis connection closed; persistent replay protection is unavailable",
     );
   });
 
   redis.connect().catch((err) => {
     console.warn(
-      "[TEE] Redis initial connection failed, using in-memory LRU:",
+      "[TEE] Redis initial connection failed; persistent replay protection is unavailable:",
       err.message,
     );
   });
@@ -559,9 +574,10 @@ function isReplayBackendUnavailable(error: unknown): boolean {
 }
 
 // In-memory LRU fallback when Redis is unavailable (non-production only)
+const PAYMENT_REPLAY_TTL_SECONDS = X402_EVM_PAYMENT_TIMEOUT_SECONDS;
 const usedPayloadHashes = new LRUCache<string, boolean>({
   max: 10000,
-  ttl: 3600000, // 1 hour TTL
+  ttl: PAYMENT_REPLAY_TTL_SECONDS * 1000,
   ttlAutopurge: true,
 });
 
@@ -586,7 +602,7 @@ async function hasPayloadHash(hash: string): Promise<boolean> {
 
 /**
  * Atomically claim a payment payload hash for one-time use.
- * Redis: SET replay:{hash} 1 NX — true only if we created the key.
+ * Redis: SET replay:{hash} 1 EX 3600 NX — true only if we created the key.
  * LRU: has-then-set within a single process (no races across event loop ticks
  * for the check+set pair since JS is single-threaded).
  * Production fails closed when Redis is unavailable (no LRU fallthrough).
@@ -598,8 +614,14 @@ async function tryClaimPayloadHash(hash: string): Promise<boolean> {
 
   if (redisReadyForReplay()) {
     try {
-      // Permanent storage — no expiry, survives restarts; NX prevents races
-      const result = await redis!.set(`replay:${hash}`, "1", "NX");
+      // EVM proofs can remain valid for one hour; retain every claim for that maximum.
+      const result = await redis!.set(
+        `replay:${hash}`,
+        "1",
+        "EX",
+        PAYMENT_REPLAY_TTL_SECONDS,
+        "NX",
+      );
       if (result === "OK") {
         usedPayloadHashes.set(hash, true);
         return true;
@@ -655,7 +677,6 @@ function getDstackClient(): DstackClient | null {
   if (client) return client;
   try {
     client = new DstackClient();
-    TEE_TYPE = "tdx";
     console.log("[TEE] dStack client initialized successfully");
     return client;
   } catch (e) {
@@ -840,6 +861,16 @@ async function rejectPaid400(
 // This handles 402 responses, payment verification, and settlement automatically
 const x402RouteAccepts = buildX402Accepts("$0.01");
 
+const paidRandomPaths = new Set([
+  "/v1/randomness",
+  "/v1/random/number",
+  "/v1/random/pick",
+  "/v1/random/shuffle",
+  "/v1/random/winners",
+  "/v1/random/uuid",
+  "/v1/random/dice",
+]);
+
 const x402Pay = paymentMiddleware(
   {
     "POST /v1/randomness": {
@@ -883,7 +914,21 @@ const x402Pay = paymentMiddleware(
 
 // Internal secret bypasses x402; everyone else pays
 app.use((req, res, next) => {
-  if (verifyInternalSecret(req)) {
+  const internalService = verifyInternalSecret(req);
+  const isPaidRequest =
+    req.method.toUpperCase() === "POST" && paidRandomPaths.has(req.path);
+
+  const blockReason = paidRngBlockReason({
+    isPaidRequest,
+    internalService,
+    redisReady: redisReadyForReplay(),
+    teeReady: TEE_TYPE === "tdx",
+  });
+  if (blockReason) {
+    return res.status(503).json({ error: blockReason });
+  }
+
+  if (internalService) {
     (req as any).internalService = true;
     return next();
   }
@@ -1461,12 +1506,30 @@ app.post(
  * GET /v1/health
  */
 app.get("/v1/health", (_req: Request, res: Response) => {
-  res.json({
-    status: "ok",
+  const production = isProductionEnvironment();
+  const redisReady = redisReadyForReplay();
+  const teeReady = TEE_TYPE === "tdx";
+  const ready = !production || (redisReady && teeReady);
+
+  res.status(ready ? 200 : 503).json({
+    status: ready ? "ok" : "degraded",
     service: "verifiable-randomness-service",
     tee_type: TEE_TYPE,
     version: VERSION,
-    environment: process.env.APP_ENVIRONMENT || "development",
+    environment: production
+      ? "production"
+      : process.env.APP_ENVIRONMENT ||
+        process.env.ENVIRONMENT ||
+        process.env.NODE_ENV ||
+        "development",
+    readiness: {
+      tee: teeReady ? "ready" : "unavailable",
+      replay_protection: redisReady
+        ? "redis"
+        : production
+          ? "unavailable"
+          : "in_memory",
+    },
     timestamp: new Date().toISOString(),
     x402_enabled: true,
     price_per_request: `$${(PRICE_PER_REQUEST_CENTS / 100).toFixed(2)}`,
@@ -1540,7 +1603,12 @@ app.get("/", (_req: Request, res: Response) => {
     appId,
     composeHash,
     nodeUrl,
-    environment: process.env.APP_ENVIRONMENT || "development",
+    environment: isProductionEnvironment()
+      ? "production"
+      : process.env.APP_ENVIRONMENT ||
+        process.env.ENVIRONMENT ||
+        process.env.NODE_ENV ||
+        "development",
     reownProjectId:
       process.env.REOWN_PROJECT_ID ||
       process.env.VITE_REOWN_PROJECT_ID ||
@@ -2044,7 +2112,7 @@ app.get("/privacy", (_req: Request, res: Response) => {
     <h2>4. Data Retention</h2>
     <p>We retain:</p>
     <ul>
-      <li>Payment signatures: 1 hour (for replay attack prevention)</li>
+      <li>Payment validity: up to 1 hour on EVM; about 60–90 seconds on Solana</li>
       <li>Usage statistics: Aggregated and anonymized, retained indefinitely</li>
       <li>Error logs: 30 days for debugging purposes</li>
     </ul>
@@ -2125,7 +2193,7 @@ async function generateAttestation(
     );
 
     // In production, refuse to serve mock attestations
-    if (process.env.NODE_ENV === "production") {
+    if (isProductionEnvironment()) {
       console.error(
         "[TEE] CRITICAL: TEE attestation failed in production — refusing to serve mock",
       );
@@ -2214,7 +2282,7 @@ async function start() {
   }
 
   // CRITICAL: Warn loudly if running in simulation mode in production
-  if (TEE_TYPE === "simulation" && process.env.NODE_ENV === "production") {
+  if (TEE_TYPE === "simulation" && isProductionEnvironment()) {
     console.error("=".repeat(80));
     console.error(
       "[TEE] CRITICAL WARNING: Running in SIMULATION mode in PRODUCTION",

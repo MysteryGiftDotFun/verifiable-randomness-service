@@ -2,6 +2,13 @@
 
 All notable changes to the Verifiable Randomness Service.
 
+## [0.1.8-BETA.10] - 2026-09-27
+
+- Require Redis-backed, atomic replay claims for paid production requests and fail closed when Redis or the TDX runtime is unavailable.
+- Bound EVM payment replay claims to the one-hour maximum payment window and report Redis/TEE readiness through `/v1/health`.
+- Package the local `bigint-buffer` compatibility fork into production dependencies so npm pruning cannot remove it from the runtime image.
+- Run Redis as a private, authenticated Phala Compose sidecar with AOF persistence and bounded memory.
+
 ## [0.1.0-BETA] - 2026-02-18
 
 ### Initial Production Release

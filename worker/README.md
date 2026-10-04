@@ -24,10 +24,10 @@ This is the Phala runtime for the live Mystery Gift randomness service.
 
 ## Deploy
 
-```bash
-cd /Users/area/repos/mystery-gift/services/verifiable-randomness-service/worker
-phala deploy --compose phala-compose.prod.yaml -e .env
-```
+Build and publish production images on the Spectre build server. Runtime secrets
+come from Infisical project `mystery-gift`, environment `prod`, path
+`/mystery-gift/randomness`, and must be applied through Phala's encrypted
+environment settings. See the repository's [deployment guide](../../DEPLOYMENT.md).
 
 ## Environment
 

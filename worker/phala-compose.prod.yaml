@@ -1,14 +1,41 @@
 services:
+  redis:
+    image: redis:7.4.11-alpine3.21
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required for the private Redis sidecar}
+    command:
+      - sh
+      - -ec
+      - >-
+        exec redis-server --appendonly yes --appendfsync always
+        --maxmemory 128mb --maxmemory-policy noeviction
+        --requirepass "$$REDIS_PASSWORD"
+    volumes:
+      - rng-redis-data:/data
+    mem_limit: 256m
+    restart: always
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG'
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
   randomness-prod:
-    image: ghcr.io/thomasjvu/vrf-service:0.1.8-BETA.8
+    image: ghcr.io/thomasjvu/vrf-service:0.1.8-BETA.10
     ports:
       - "3000:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
     environment:
       - PORT=3000
       - NODE_ENV=production
       - APP_ENVIRONMENT=production
       - ENVIRONMENT=production
-      - APP_VERSION=\${APP_VERSION:-0.1.8-BETA.8}
+      - APP_VERSION=\${APP_VERSION:-0.1.8-BETA.10}
       - PAYMENT_WALLET=${PAYMENT_WALLET:?PAYMENT_WALLET is required}
       - PAYMENT_WALLET_BASE=${PAYMENT_WALLET_BASE:-}
       - HELIUS_RPC_URL=${HELIUS_RPC_URL:?HELIUS_RPC_URL is required}
@@ -17,8 +44,8 @@ services:
       - SUPPORTED_NETWORKS=${SUPPORTED_NETWORKS:-solana,base}
       - ARWEAVE_ENABLED=${ARWEAVE_ENABLED:-true}
       - PHALA_APP_ID=${PHALA_APP_ID:-}
-      - PHALA_CLUSTER=${PHALA_CLUSTER:-prod5}
-      - REDIS_URL=${REDIS_URL:-}
+      - PHALA_CLUSTER=${PHALA_CLUSTER:-prod9}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required for production replay protection}@redis:6379/0
       - REOWN_PROJECT_ID=${REOWN_PROJECT_ID:-}
       - VITE_REOWN_PROJECT_ID=${VITE_REOWN_PROJECT_ID:-}
       - TEE_RANDOMNESS_API_KEY=${TEE_RANDOMNESS_API_KEY:-}
@@ -32,3 +59,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+volumes:
+  rng-redis-data:

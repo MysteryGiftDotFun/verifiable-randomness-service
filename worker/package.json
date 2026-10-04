@@ -1,6 +1,6 @@
 {
   "name": "verifiable-randomness-service",
-  "version": "0.1.8-BETA.8",
+  "version": "0.1.8-BETA.10",
   "description": "Secure Randomness Generator for Phala TEE with x402 Payment Support",
   "type": "module",
   "main": "dist/index.js",
@@ -14,21 +14,18 @@
     "test": "node --experimental-strip-types --test src/*.test.ts"
   },
   "dependencies": {
-    "@ardrive/turbo-sdk": "^1.19.0",
+    "@ardrive/turbo-sdk": "2.1.0",
     "@payai/facilitator": "^2.2.4",
-    "@payai/x402-evm": "^2.2.4",
-    "@payai/x402-svm": "^2.2.4",
     "@phala/dstack-sdk": "^0.5.7",
-    "@sentry/node": "^7.99.0",
     "@solana/web3.js": "^1.98.4",
     "@x402/core": "^2.4.0",
     "@x402/evm": "^2.4.0",
     "@x402/express": "^2.4.0",
     "@x402/svm": "^2.4.0",
+    "bigint-buffer": "file:patches/bigint-buffer",
     "bs58": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "ethers": "^6.16.0",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "ioredis": "^5.4.1",
@@ -43,6 +40,12 @@
     "typescript": "^5.3.2"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.6.0"
+  },
+  "overrides": {
+    "elliptic": "6.6.1",
+    "secp256k1": "5.0.2",
+    "jayson": "5.0.0",
+    "ws@^7.0.0": "7.5.11"
   }
 }

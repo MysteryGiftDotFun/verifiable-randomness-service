@@ -1,16 +1,17 @@
-FROM node:20
+FROM node:24.21.0-bookworm-slim
 
 WORKDIR /app
 
 # Install curl for healthcheck
-RUN apt-get update --allow-insecure-repositories && apt-get install -y --allow-unauthenticated curl jq && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends curl jq && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies
-COPY package.json .
-COPY tsconfig.json .
+COPY package.json package-lock.json tsconfig.json ./
+COPY patches ./patches
 
-# Remove workspace:* deps (not supported by npm), then install deps
-RUN npm install
+# Pack local file dependencies into node_modules so pruning dev dependencies
+# cannot remove the production bigint-buffer compatibility package.
+RUN npm ci --install-links=true
 
 # Copy source
 COPY src ./src
@@ -24,14 +25,15 @@ RUN npm run build
 RUN mkdir -p dist/static && cp static/*.js dist/static/ && ls -la dist/
 
 # Remove dev dependencies
-RUN npm prune --production
+RUN npm prune --omit=dev --install-links=true \
+  && node --input-type=module -e "await import('bigint-buffer')"
 
 # Create non-root runtime user. The app only needs read access to /app,
 # so avoid a recursive chown layer that makes every image push very large.
 RUN useradd -m -s /bin/bash appuser
 USER appuser
 
-ENV PORT=3000
+ENV NODE_ENV=production APP_ENVIRONMENT=production ENVIRONMENT=production PORT=3000
 EXPOSE 3000
 
 # Healthcheck
