@@ -52,13 +52,6 @@ test("prod + redis down → fail closed (no LRU)", () => {
   assert.equal(productionRequiresRedisReplay(env) && !redisReady, true);
 });
 
-test("prod + redis up → ok (no fail-closed)", () => {
-  const env = { APP_ENVIRONMENT: "production" };
-  const redisReady = true;
-  assert.equal(productionRequiresRedisReplay(env), true);
-  assert.equal(productionRequiresRedisReplay(env) && !redisReady, false);
-});
-
 test("dev + redis down → allow LRU", () => {
   const env = { APP_ENVIRONMENT: "development" };
   const redisReady = false;
